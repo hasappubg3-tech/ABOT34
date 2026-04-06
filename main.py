@@ -9,14 +9,11 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 DB = "data.db"
 
-ICONS = {"menu": "📂", "text": "📄", "photo": "📄", "file": "📄", "video": "📄", "audio": "📄", "content": "📄"}
-
-# ── أزرار خاصة ───────────────────────────────────────────────────
-BTN_BACK      = "🔙 رجوع"
-BTN_ADD       = "➕ إضافة"
-BTN_MANAGE    = "⚙️ إدارة"
-BTN_ADMINS    = "👥 مشرفون"
-BTN_CANCEL    = "❌ إلغاء"
+BTN_BACK   = "🔙 رجوع"
+BTN_ADD    = "➕ إضافة"
+BTN_MANAGE = "⚙️ إدارة"
+BTN_ADMINS = "👥 مشرفون"
+BTN_CANCEL = "❌ إلغاء"
 
 TYPE_MAP = {
     "📂 قائمة":  "menu",
@@ -26,7 +23,7 @@ TYPE_MAP = {
 ADMIN_BTNS   = {BTN_ADD, BTN_MANAGE, BTN_ADMINS}
 SPECIAL_BTNS = {BTN_BACK, BTN_ADD, BTN_MANAGE, BTN_ADMINS, BTN_CANCEL} | set(TYPE_MAP.keys())
 
-# ── قاعدة البيانات ───────────────────────────────────────────────
+# ── قاعدة البيانات ────────────────────────────────────────────────
 def db():
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
@@ -40,7 +37,15 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 parent_id INTEGER REFERENCES buttons(id) ON DELETE CASCADE,
                 type TEXT NOT NULL, label TEXT NOT NULL,
-                content TEXT, file_id TEXT, ord INTEGER DEFAULT 0
+                ord INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS content_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                button_id INTEGER NOT NULL REFERENCES buttons(id) ON DELETE CASCADE,
+                type TEXT NOT NULL,
+                content TEXT,
+                file_id TEXT,
+                ord INTEGER DEFAULT 0
             );
         """)
 
@@ -57,29 +62,27 @@ def all_admins():
     return [dict(r) for r in db().execute("SELECT * FROM admins").fetchall()]
 
 def get_buttons(pid=None):
-    q = "SELECT * FROM buttons WHERE parent_id IS NULL ORDER BY ord,id" if pid is None \
-        else "SELECT * FROM buttons WHERE parent_id=? ORDER BY ord,id"
-    return [dict(r) for r in (db().execute(q) if pid is None else db().execute(q, (pid,))).fetchall()]
+    if pid is None:
+        q = "SELECT * FROM buttons WHERE parent_id IS NULL ORDER BY ord,id"
+        return [dict(r) for r in db().execute(q).fetchall()]
+    return [dict(r) for r in db().execute(
+        "SELECT * FROM buttons WHERE parent_id=? ORDER BY ord,id", (pid,)).fetchall()]
 
 def get_btn(bid):
     r = db().execute("SELECT * FROM buttons WHERE id=?", (bid,)).fetchone()
     return dict(r) if r else None
 
-def add_btn(pid, t, label, content=None, file_id=None):
+def add_btn(pid, t, label):
     c = db(); cur = c.cursor()
-    q = "SELECT COALESCE(MAX(ord),0)+1 FROM buttons WHERE parent_id IS NULL" if pid is None \
-        else "SELECT COALESCE(MAX(ord),0)+1 FROM buttons WHERE parent_id=?"
-    n = (cur.execute(q) if pid is None else cur.execute(q, (pid,))).fetchone()[0]
-    cur.execute("INSERT INTO buttons(parent_id,type,label,content,file_id,ord) VALUES(?,?,?,?,?,?)",
-                (pid, t, label, content, file_id, n))
+    if pid is None:
+        n = cur.execute("SELECT COALESCE(MAX(ord),0)+1 FROM buttons WHERE parent_id IS NULL").fetchone()[0]
+    else:
+        n = cur.execute("SELECT COALESCE(MAX(ord),0)+1 FROM buttons WHERE parent_id=?", (pid,)).fetchone()[0]
+    cur.execute("INSERT INTO buttons(parent_id,type,label,ord) VALUES(?,?,?,?)", (pid, t, label, n))
     c.commit(); lid = cur.lastrowid; c.close(); return lid
 
-def upd_btn(bid, label=None, content=None, file_id=None):
-    c = db(); cur = c.cursor()
-    if label   is not None: cur.execute("UPDATE buttons SET label=?   WHERE id=?", (label,   bid))
-    if content is not None: cur.execute("UPDATE buttons SET content=? WHERE id=?", (content, bid))
-    if file_id is not None: cur.execute("UPDATE buttons SET file_id=? WHERE id=?", (file_id, bid))
-    c.commit(); c.close()
+def upd_btn_label(bid, label):
+    c = db(); c.execute("UPDATE buttons SET label=? WHERE id=?", (label, bid)); c.commit(); c.close()
 
 def del_btn(bid):
     c = db(); c.execute("DELETE FROM buttons WHERE id=?", (bid,)); c.commit(); c.close()
@@ -88,9 +91,10 @@ def move_btn(bid, direction):
     c = db(); cur = c.cursor()
     row = dict(cur.execute("SELECT * FROM buttons WHERE id=?", (bid,)).fetchone())
     pid = row["parent_id"]
-    q = "SELECT id FROM buttons WHERE parent_id IS NULL ORDER BY ord,id" if pid is None \
-        else "SELECT id FROM buttons WHERE parent_id=? ORDER BY ord,id"
-    ids = [r[0] for r in (cur.execute(q) if pid is None else cur.execute(q, (pid,))).fetchall()]
+    if pid is None:
+        ids = [r[0] for r in cur.execute("SELECT id FROM buttons WHERE parent_id IS NULL ORDER BY ord,id").fetchall()]
+    else:
+        ids = [r[0] for r in cur.execute("SELECT id FROM buttons WHERE parent_id=? ORDER BY ord,id", (pid,)).fetchall()]
     i = ids.index(bid); j = i - 1 if direction == "up" else i + 1
     if not (0 <= j < len(ids)): c.close(); return
     o1 = cur.execute("SELECT ord FROM buttons WHERE id=?", (bid,)).fetchone()[0]
@@ -99,10 +103,43 @@ def move_btn(bid, direction):
     cur.execute("UPDATE buttons SET ord=? WHERE id=?", (o1, ids[j]))
     c.commit(); c.close()
 
-# ── بناء الكيبورد ────────────────────────────────────────────────
+# ── content_items ─────────────────────────────────────────────────
+def get_items(bid):
+    return [dict(r) for r in db().execute(
+        "SELECT * FROM content_items WHERE button_id=? ORDER BY ord,id", (bid,)).fetchall()]
+
+def add_item(bid, t, content=None, file_id=None):
+    c = db(); cur = c.cursor()
+    n = cur.execute("SELECT COALESCE(MAX(ord),0)+1 FROM content_items WHERE button_id=?", (bid,)).fetchone()[0]
+    cur.execute("INSERT INTO content_items(button_id,type,content,file_id,ord) VALUES(?,?,?,?,?)",
+                (bid, t, content, file_id, n))
+    c.commit(); c.close()
+
+def del_item(iid):
+    c = db(); c.execute("DELETE FROM content_items WHERE id=?", (iid,)); c.commit(); c.close()
+
+# ── اكتشاف نوع المحتوى تلقائياً ─────────────────────────────────
+def detect_content(m):
+    if m.photo:
+        return "photo", m.caption, m.photo[-1].file_id
+    if m.document:
+        return "file", m.caption, m.document.file_id
+    if m.video:
+        return "video", m.caption, m.video.file_id
+    if m.audio:
+        return "audio", m.caption, m.audio.file_id
+    if m.voice:
+        return "audio", m.caption, m.voice.file_id
+    if m.text:
+        return "text", m.text, None
+    return None, None, None
+
+# ── بناء لوحة مفاتيح الرد ────────────────────────────────────────
+ICON = {"menu": "📂", "content": "📄"}
+
 def build_kb(uid, pid=None):
     btns = get_buttons(pid)
-    rows = [[KeyboardButton(f"{ICONS.get(b['type'],'')} {b['label']}")] for b in btns]
+    rows = [[KeyboardButton(f"{ICON.get(b['type'],'📄')} {b['label']}")] for b in btns]
     if pid is not None:
         rows.append([KeyboardButton(BTN_BACK)])
     if is_admin(uid):
@@ -115,12 +152,12 @@ def build_type_kb():
         [BTN_CANCEL],
     ], resize_keyboard=True)
 
-# ── لوحة إدارة الأزرار (Inline) ─────────────────────────────────
+# ── لوحات Inline ─────────────────────────────────────────────────
 def kb_manage(pid=None):
     rows = []
     for b in get_buttons(pid):
         rows.append([
-            InlineKeyboardButton(f"{ICONS.get(b['type'],'')} {b['label']}", callback_data=f"e_{b['id']}"),
+            InlineKeyboardButton(f"{ICON.get(b['type'],'📄')} {b['label']}", callback_data=f"e_{b['id']}"),
             InlineKeyboardButton("⬆️", callback_data=f"u_{b['id']}"),
             InlineKeyboardButton("⬇️", callback_data=f"d_{b['id']}"),
             InlineKeyboardButton("🗑", callback_data=f"x_{b['id']}"),
@@ -132,18 +169,42 @@ def kb_manage(pid=None):
         rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="m_r" if back is None else f"m_{back}")])
     return InlineKeyboardMarkup(rows)
 
-def kb_edit_btn(bid):
-    b = get_btn(bid); rows = []
-    if b and b["type"] == "menu":
-        rows.append([InlineKeyboardButton("📂 فتح القائمة", callback_data=f"m_{bid}")])
-    rows += [
-        [InlineKeyboardButton("✏️ تعديل الاسم",    callback_data=f"el_{bid}")],
-        [InlineKeyboardButton("✏️ تعديل المحتوى", callback_data=f"ec_{bid}")],
-        [InlineKeyboardButton("🗑 حذف",             callback_data=f"x_{bid}")],
+def kb_edit_menu_btn(bid):
+    b = get_btn(bid)
+    rows = [
+        [InlineKeyboardButton("📂 فتح القائمة", callback_data=f"m_{bid}")],
+        [InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"el_{bid}")],
+        [InlineKeyboardButton("🗑 حذف",          callback_data=f"x_{bid}")],
     ]
     pid = b["parent_id"] if b else None
     rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="m_r" if pid is None else f"m_{pid}")])
     return InlineKeyboardMarkup(rows)
+
+def kb_content_panel(bid):
+    """لوحة إدارة محتوى الزر: قائمة العناصر + إضافة + تغيير الاسم."""
+    items = get_items(bid)
+    rows = []
+    for item in items:
+        label = _item_label(item)
+        rows.append([
+            InlineKeyboardButton(label, callback_data="noop"),
+            InlineKeyboardButton("🗑", callback_data=f"ci_del_{item['id']}"),
+        ])
+    rows.append([InlineKeyboardButton("➕ إضافة محتوى", callback_data=f"ci_add_{bid}")])
+    b = get_btn(bid)
+    rows.append([InlineKeyboardButton("✏️ تغيير الاسم",  callback_data=f"el_{bid}")])
+    rows.append([InlineKeyboardButton("🗑 حذف الزر",      callback_data=f"x_{bid}")])
+    pid = b["parent_id"] if b else None
+    rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="m_r" if pid is None else f"m_{pid}")])
+    return InlineKeyboardMarkup(rows)
+
+def _item_label(item):
+    icons = {"text": "📝", "photo": "🖼", "file": "📎", "video": "🎬", "audio": "🎵"}
+    icon = icons.get(item["type"], "📄")
+    snippet = (item.get("content") or "")[:20]
+    if item["type"] == "text":
+        return f"{icon} {snippet}" if snippet else icon
+    return f"{icon} {item['type']}"
 
 def kb_admins_inline():
     rows = []
@@ -159,7 +220,7 @@ def kb_admins_inline():
 def kb_cancel_inline():
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data="cancel")]])
 
-# ── مساعد لوحة التحكم ────────────────────────────────────────────
+# ── مساعد اللوحة الثابتة ─────────────────────────────────────────
 async def set_panel(ctx, chat_id, text, markup=None):
     pid = ctx.user_data.get("panel_id")
     if pid:
@@ -172,24 +233,26 @@ async def set_panel(ctx, chat_id, text, markup=None):
     msg = await ctx.bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
     ctx.user_data["panel_id"] = msg.message_id
 
-# ── اكتشاف نوع المحتوى تلقائياً ─────────────────────────────────
-def detect_content(m):
-    """Returns (type, content, file_id) from a message, or (None,None,None)."""
-    if m.photo:
-        return "photo", m.caption, m.photo[-1].file_id
-    if m.document:
-        return "file", m.caption, m.document.file_id
-    if m.video:
-        return "video", m.caption, m.video.file_id
-    if m.audio:
-        return "audio", m.caption, m.audio.file_id
-    if m.voice:
-        return "audio", m.caption, m.voice.file_id
-    if m.text:
-        return "text", m.text, None
-    return None, None, None
+# ── عرض عناصر المحتوى للمستخدم ───────────────────────────────────
+async def send_items(m, bid):
+    items = get_items(bid)
+    if not items:
+        await m.reply_text("📭 لا يوجد محتوى بعد.")
+        return
+    for item in items:
+        t = item["type"]; fid = item.get("file_id"); cap = item.get("content") or ""
+        if t == "text":
+            await m.reply_text(cap)
+        elif t == "photo" and fid:
+            await m.reply_photo(fid, caption=cap)
+        elif t == "file" and fid:
+            await m.reply_document(fid, caption=cap)
+        elif t == "video" and fid:
+            await m.reply_video(fid, caption=cap)
+        elif t == "audio" and fid:
+            await m.reply_audio(fid, caption=cap)
 
-# ── /start ───────────────────────────────────────────────────────
+# ── /start ────────────────────────────────────────────────────────
 async def cmd_start(update: Update, ctx):
     uid = update.effective_user.id
     ctx.user_data.clear()
@@ -202,78 +265,79 @@ async def cmd_start(update: Update, ctx):
 async def cmd_myid(update: Update, ctx):
     await update.message.reply_text(f"🆔 `{update.effective_user.id}`", parse_mode="Markdown")
 
-# ── معالج الرسائل الرئيسي ────────────────────────────────────────
+# ── معالج الرسائل الرئيسي ─────────────────────────────────────────
 async def on_message(update: Update, ctx):
     m = update.message
     uid = update.effective_user.id
     text = (m.text or "").strip()
     state = ctx.user_data.get("state")
-    pid = ctx.user_data.get("pid")          # القائمة الحالية للتصفح
+    pid = ctx.user_data.get("pid")
     chat_id = m.chat_id
 
-    # ── حالات انتظار الإدخال ──────────────────────────────────────
+    # ── انتظار اسم الزر ───────────────────────────────────────────
     if state == "wait_label":
         if not text or text in SPECIAL_BTNS:
             await m.reply_text("⚠️ أرسل نصاً صحيحاً للاسم."); return
         t = ctx.user_data.get("new_type"); add_pid = ctx.user_data.get("add_pid")
+        bid = add_btn(add_pid, t, text)
+        ctx.user_data.pop("state", None); ctx.user_data.pop("new_type", None)
         if t == "menu":
-            add_btn(add_pid, "menu", text)
-            ctx.user_data.pop("state", None); ctx.user_data.pop("new_type", None)
             await m.reply_text(f"✅ تم إنشاء القائمة *{text}*", parse_mode="Markdown",
                                reply_markup=build_kb(uid, pid))
         else:
-            ctx.user_data["new_label"] = text; ctx.user_data["state"] = "wait_content"
-            await m.reply_text("📤 أرسل المحتوى الآن:", reply_markup=ReplyKeyboardMarkup(
-                [[KeyboardButton(BTN_CANCEL)]], resize_keyboard=True))
+            # content button: create and open its management panel
+            await m.reply_text(f"✅ تم إنشاء الزر *{text}*\n\nيمكنك الآن إضافة المحتوى:",
+                               parse_mode="Markdown", reply_markup=build_kb(uid, pid))
+            await set_panel(ctx, chat_id,
+                            f"📄 *{text}*\n\nلا يوجد محتوى بعد. اضغط ➕ لإضافة محتوى.",
+                            kb_content_panel(bid))
         return
 
-    if state == "wait_content":
-        add_pid = ctx.user_data.get("add_pid")
-        label = ctx.user_data.get("new_label", "زر")
+    # ── انتظار محتوى جديد لزر موجود ──────────────────────────────
+    if state == "wait_item_content":
+        bid = ctx.user_data.get("item_bid")
         t, content, fid = detect_content(m)
         if t is None:
             await m.reply_text("⚠️ أرسل نصاً أو صورة أو ملفاً أو فيديو أو صوتاً."); return
-        add_btn(add_pid, t, label, content, fid)
-        ctx.user_data.pop("state", None)
-        await m.reply_text(f"✅ تم إضافة *{label}*", parse_mode="Markdown",
-                           reply_markup=build_kb(uid, pid))
+        if t == "text" and text in SPECIAL_BTNS:
+            await m.reply_text("⚠️ أرسل نصاً صحيحاً."); return
+        add_item(bid, t, content, fid)
+        ctx.user_data.pop("state", None); ctx.user_data.pop("item_bid", None)
+        b = get_btn(bid)
+        items = get_items(bid)
+        await set_panel(ctx, chat_id,
+                        f"📄 *{b['label']}*\n_{len(items)} عنصر_",
+                        kb_content_panel(bid))
+        await m.reply_text("✅ تمت الإضافة.", reply_markup=build_kb(uid, pid))
         return
 
+    # ── انتظار اسم جديد للتعديل ───────────────────────────────────
     if state == "wait_edit_label":
-        if not text or text in SPECIAL_BTNS: await m.reply_text("⚠️ أرسل نصاً صحيحاً."); return
-        bid = ctx.user_data.get("edit_bid"); upd_btn(bid, label=text)
-        b = get_btn(bid); ep = b["parent_id"] if b else None
-        ctx.user_data.pop("state", None)
-        await set_panel(ctx, chat_id, f"✅ تم تغيير الاسم إلى *{text}*", kb_manage(ep))
+        if not text or text in SPECIAL_BTNS:
+            await m.reply_text("⚠️ أرسل نصاً صحيحاً."); return
+        bid = ctx.user_data.get("edit_bid"); upd_btn_label(bid, text)
+        b = get_btn(bid); ctx.user_data.pop("state", None)
+        if b and b["type"] == "content":
+            await set_panel(ctx, chat_id, f"📄 *{text}*", kb_content_panel(bid))
+        else:
+            ep = b["parent_id"] if b else None
+            await set_panel(ctx, chat_id, f"✅ تم تغيير الاسم إلى *{text}*", kb_manage(ep))
         await m.reply_text("✅", reply_markup=build_kb(uid, pid))
         return
 
-    if state == "wait_edit_content":
-        bid = ctx.user_data.get("edit_bid")
-        t, content, fid = detect_content(m)
-        if t is None or (t == "text" and text in SPECIAL_BTNS):
-            await m.reply_text("⚠️ أرسل نصاً أو صورة أو ملفاً أو فيديو أو صوتاً."); return
-        upd_btn(bid, content=content, file_id=fid)
-        b = get_btn(bid); ep = b["parent_id"] if b else None
-        # update the stored type too
-        conn = db(); conn.execute("UPDATE buttons SET type=? WHERE id=?", (t, bid)); conn.commit(); conn.close()
-        ctx.user_data.pop("state", None)
-        await set_panel(ctx, chat_id, "✅ تم تحديث المحتوى.", kb_manage(ep))
-        await m.reply_text("✅", reply_markup=build_kb(uid, pid))
-        return
-
+    # ── انتظار رقم المشرف ─────────────────────────────────────────
     if state == "wait_admin_id":
         try: tid = int(text)
         except ValueError: await m.reply_text("⚠️ أرسل رقم ID صحيح."); return
         add_admin(tid); ctx.user_data.pop("state", None)
-        await set_panel(ctx, chat_id, f"✅ تمت إضافة المشرف.\n\n👥 *المشرفون* ({len(all_admins())}):", kb_admins_inline())
+        await set_panel(ctx, chat_id, f"👥 *المشرفون* ({len(all_admins())}):", kb_admins_inline())
         await m.reply_text("✅", reply_markup=build_kb(uid, pid))
         return
 
-    # ── اختيار النوع ──────────────────────────────────────────────
+    # ── اختيار نوع الزر ───────────────────────────────────────────
     if state == "wait_type" and text in TYPE_MAP:
         t = TYPE_MAP[text]; ctx.user_data["new_type"] = t; ctx.user_data["state"] = "wait_label"
-        await m.reply_text("✏️ اكتب اسم الزر وأرسله:", reply_markup=build_kb(uid, pid))
+        await m.reply_text("✏️ اكتب اسم الزر:", reply_markup=build_kb(uid, pid))
         return
 
     # ── إلغاء ─────────────────────────────────────────────────────
@@ -296,18 +360,17 @@ async def on_message(update: Update, ctx):
             ctx.user_data["state"] = "wait_type"; ctx.user_data["add_pid"] = pid
             await m.reply_text("اختر نوع الزر:", reply_markup=build_type_kb())
             return
-
         if text == BTN_MANAGE:
             await set_panel(ctx, chat_id, "⚙️ *إدارة الأزرار*:", kb_manage(pid))
             return
-
         if text == BTN_ADMINS:
             await set_panel(ctx, chat_id, f"👥 *المشرفون* ({len(all_admins())}):", kb_admins_inline())
             return
 
-    # ── ضغط زر مستخدم (تصفح / محتوى) ────────────────────────────
+    # ── ضغط زر من القائمة ─────────────────────────────────────────
     btns = get_buttons(pid)
-    matched = next((b for b in btns if f"{ICONS.get(b['type'],'')} {b['label']}" == text), None)
+    matched = next((b for b in btns
+                    if f"{ICON.get(b['type'],'📄')} {b['label']}" == text), None)
     if not matched:
         return
 
@@ -316,30 +379,16 @@ async def on_message(update: Update, ctx):
         ctx.user_data["pid"] = b["id"]
         await m.reply_text(f"📂 {b['label']}", reply_markup=build_kb(uid, b["id"]))
 
-    elif b["type"] == "text":
-        await m.reply_text(f"📝 *{b['label']}*\n\n{b.get('content') or ''}", parse_mode="Markdown",
-                           reply_markup=build_kb(uid, pid))
+    elif b["type"] == "content":
+        if is_admin(uid):
+            items = get_items(b["id"])
+            await set_panel(ctx, chat_id,
+                            f"📄 *{b['label']}*\n_{len(items)} عنصر_",
+                            kb_content_panel(b["id"]))
+        else:
+            await send_items(m, b["id"])
 
-    elif b["type"] == "photo" and b.get("file_id"):
-        cap = f"🖼 *{b['label']}*" + (f"\n\n{b['content']}" if b.get("content") else "")
-        await m.reply_photo(b["file_id"], caption=cap, parse_mode="Markdown")
-
-    elif b["type"] == "file" and b.get("file_id"):
-        cap = f"📎 *{b['label']}*" + (f"\n\n{b['content']}" if b.get("content") else "")
-        await m.reply_document(b["file_id"], caption=cap, parse_mode="Markdown")
-
-    elif b["type"] == "video" and b.get("file_id"):
-        cap = f"🎬 *{b['label']}*" + (f"\n\n{b['content']}" if b.get("content") else "")
-        await m.reply_video(b["file_id"], caption=cap, parse_mode="Markdown")
-
-    elif b["type"] == "audio" and b.get("file_id"):
-        cap = f"🎵 *{b['label']}*" + (f"\n\n{b['content']}" if b.get("content") else "")
-        await m.reply_audio(b["file_id"], caption=cap, parse_mode="Markdown")
-
-    else:
-        await m.reply_text("❌ لا يوجد محتوى.")
-
-# ── معالج أزرار لوحة الإدارة (Inline) ───────────────────────────
+# ── معالج أزرار Inline ────────────────────────────────────────────
 async def cb_manage(update: Update, ctx):
     q = update.callback_query; await q.answer()
     uid = q.from_user.id
@@ -348,53 +397,89 @@ async def cb_manage(update: Update, ctx):
     ctx.user_data["panel_id"] = q.message.message_id
     pid = ctx.user_data.get("pid")
 
+    if d == "noop": return
+
     if d == "cancel":
+        ctx.user_data.pop("state", None)
         await q.edit_message_text("✅ تم الإلغاء."); return
 
+    # ── تنقل في لوحة الإدارة العامة ──────────────────────────────
     if d == "m_r":
         await q.edit_message_text("⚙️ *إدارة الأزرار*:", parse_mode="Markdown",
                                   reply_markup=kb_manage()); return
 
     if d.startswith("m_"):
         ep = int(d[2:]); b = get_btn(ep)
-        await q.edit_message_text(f"📂 *{b['label']}*", parse_mode="Markdown",
-                                  reply_markup=kb_manage(ep)); return
+        if b and b["type"] == "content":
+            items = get_items(ep)
+            await q.edit_message_text(f"📄 *{b['label']}*\n_{len(items)} عنصر_",
+                                      parse_mode="Markdown", reply_markup=kb_content_panel(ep))
+        else:
+            await q.edit_message_text(f"📂 *{b['label']}*" if b else "⚙️ *إدارة الأزرار*:",
+                                      parse_mode="Markdown", reply_markup=kb_manage(ep if b else None))
+        return
 
+    # ── فتح تفاصيل زر من لوحة الإدارة ───────────────────────────
     if d.startswith("e_"):
         bid = int(d[2:]); b = get_btn(bid)
-        await q.edit_message_text(f"*{b['label']}*  —  {ICONS.get(b['type'],'')} {b['type']}",
-                                  parse_mode="Markdown", reply_markup=kb_edit_btn(bid)); return
+        if not b: return
+        if b["type"] == "content":
+            items = get_items(bid)
+            await q.edit_message_text(f"📄 *{b['label']}*\n_{len(items)} عنصر_",
+                                      parse_mode="Markdown", reply_markup=kb_content_panel(bid))
+        else:
+            await q.edit_message_text(f"📂 *{b['label']}*", parse_mode="Markdown",
+                                      reply_markup=kb_edit_menu_btn(bid))
+        return
 
+    # ── تحريك الأزرار ─────────────────────────────────────────────
     if d.startswith("u_") or d.startswith("d_"):
         up = d.startswith("u_"); bid = int(d[2:])
         move_btn(bid, "up" if up else "down")
         b = get_btn(bid)
         await q.edit_message_reply_markup(reply_markup=kb_manage(b["parent_id"])); return
 
+    # ── حذف زر ────────────────────────────────────────────────────
     if d.startswith("x_"):
         bid = int(d[2:]); b = get_btn(bid); ep = b["parent_id"] if b else None
         del_btn(bid)
         await q.edit_message_text("⚙️ *إدارة الأزرار*:", parse_mode="Markdown",
                                   reply_markup=kb_manage(ep)); return
 
+    # ── إضافة من لوحة الإدارة ─────────────────────────────────────
     if d.startswith("add_"):
         pctx = d[4:]; ep = None if pctx == "r" else int(pctx)
         ctx.user_data["state"] = "wait_type"; ctx.user_data["add_pid"] = ep
         await q.message.reply_text("اختر نوع الزر:", reply_markup=build_type_kb()); return
 
+    # ── تعديل اسم الزر ───────────────────────────────────────────
     if d.startswith("el_"):
         bid = int(d[3:]); ctx.user_data["edit_bid"] = bid; b = get_btn(bid)
         ctx.user_data["state"] = "wait_edit_label"
         await q.edit_message_text(f"✏️ الاسم الحالي: *{b['label']}*\n\nاكتب الاسم الجديد:",
                                   parse_mode="Markdown", reply_markup=kb_cancel_inline()); return
 
-    if d.startswith("ec_"):
-        bid = int(d[3:]); b = get_btn(bid)
-        if b["type"] == "menu": await q.answer("القوائم لا تحتوي محتوى مباشر.", show_alert=True); return
-        ctx.user_data["edit_bid"] = bid
-        ctx.user_data["state"] = "wait_edit_content"
-        await q.edit_message_text("✏️ أرسل المحتوى الجديد (نص أو صورة أو ملف...):", reply_markup=kb_cancel_inline()); return
+    # ── لوحة محتوى الزر: إضافة عنصر ─────────────────────────────
+    if d.startswith("ci_add_"):
+        bid = int(d[7:])
+        ctx.user_data["state"] = "wait_item_content"
+        ctx.user_data["item_bid"] = bid
+        await q.edit_message_text("📤 أرسل المحتوى (نص، صورة، ملف، فيديو، صوت):",
+                                  reply_markup=kb_cancel_inline()); return
 
+    # ── لوحة محتوى الزر: حذف عنصر ───────────────────────────────
+    if d.startswith("ci_del_"):
+        iid = int(d[7:])
+        conn = db()
+        row = conn.execute("SELECT button_id FROM content_items WHERE id=?", (iid,)).fetchone()
+        conn.close()
+        if not row: return
+        bid = row[0]; del_item(iid)
+        b = get_btn(bid); items = get_items(bid)
+        await q.edit_message_text(f"📄 *{b['label']}*\n_{len(items)} عنصر_",
+                                  parse_mode="Markdown", reply_markup=kb_content_panel(bid)); return
+
+    # ── إدارة المشرفين ────────────────────────────────────────────
     if d == "aa":
         ctx.user_data["state"] = "wait_admin_id"
         await q.edit_message_text("👤 أرسل معرّف المستخدم (ID):", reply_markup=kb_cancel_inline()); return
@@ -406,9 +491,7 @@ async def cb_manage(update: Update, ctx):
         await q.edit_message_text(f"👥 *المشرفون* ({len(all_admins())}):",
                                   parse_mode="Markdown", reply_markup=kb_admins_inline()); return
 
-    if d == "noop": return
-
-# ── إعداد البوت ─────────────────────────────────────────────────
+# ── إعداد البوت ──────────────────────────────────────────────────
 async def post_init(app):
     sid = os.environ.get("SUPER_ADMIN_ID", "").strip()
     if sid.isdigit() and not is_admin(int(sid)):
