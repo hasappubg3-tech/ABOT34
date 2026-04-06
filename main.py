@@ -218,18 +218,23 @@ def kb_manage(pid=None):
     return InlineKeyboardMarkup(rows)
 
 def kb_swap_select(pid=None, first_bid=None):
-    """لوحة اختيار الزر للتبديل."""
+    """لوحة اختيار الزر للتبديل — بنفس تخطيط الأزرار الأصلي."""
     btns = get_buttons(pid)
-    ctx = "r" if pid is None else str(pid)
     rows = []
-    for b in btns:
+    current_row = []
+    for i, b in enumerate(btns):
+        if i > 0 and b.get('new_row', 1) and current_row:
+            rows.append(current_row)
+            current_row = []
         if first_bid is None:
-            rows.append([InlineKeyboardButton(b['label'], callback_data=f"swp1_{b['id']}")])
+            current_row.append(InlineKeyboardButton(b['label'], callback_data=f"swp1_{b['id']}"))
         elif b['id'] == first_bid:
-            rows.append([InlineKeyboardButton(f"✅ {b['label']}", callback_data="noop")])
+            current_row.append(InlineKeyboardButton(f"✅ {b['label']}", callback_data="noop"))
         else:
-            rows.append([InlineKeyboardButton(b['label'], callback_data=f"swp2_{first_bid}_{b['id']}")])
-    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"m_r" if pid is None else f"m_{pid}")])
+            current_row.append(InlineKeyboardButton(b['label'], callback_data=f"swp2_{first_bid}_{b['id']}"))
+    if current_row:
+        rows.append(current_row)
+    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data="m_r" if pid is None else f"m_{pid}")])
     return InlineKeyboardMarkup(rows)
 
 def kb_edit_menu_btn(bid):
