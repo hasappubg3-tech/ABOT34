@@ -130,6 +130,33 @@ def add_btn_after(after_bid, pid, t, label, new_row=1):
 def upd_btn_label(bid, label):
     c = db(); c.execute("UPDATE buttons SET label=? WHERE id=?", (label, bid)); c.commit(); c.close()
 
+def _create_nested_buttons(parent_id, buttons_list, anchor_id=None, use_after=False):
+    """ينشئ قائمة أزرار داخل parent_id بشكل متداخل (يدعم children)."""
+    added = []
+    last_id = anchor_id
+    for btn in buttons_list:
+        label = btn.get("label", "").strip()
+        btype = btn.get("type", "menu")
+        new_row = btn.get("new_row", True)
+        children = btn.get("children", [])
+        if not label:
+            continue
+        if btype not in ("menu", "content"):
+            btype = "menu"
+        nr = 0 if not new_row else 1
+        if last_id is None and not use_after:
+            new_id = add_btn(parent_id, btype, label)
+        else:
+            new_id = add_btn_after(last_id, parent_id, btype, label, new_row=nr)
+        last_id = new_id
+        use_after = True
+        depth = "📂" if btype == "menu" else "📄"
+        added.append(f"{depth} {label}")
+        if children and btype == "menu":
+            child_added = _create_nested_buttons(new_id, children)
+            added.extend(f"  └ {a}" for a in child_added)
+    return added
+
 def del_btn(bid):
     c = db(); c.execute("DELETE FROM buttons WHERE id=?", (bid,)); c.commit(); c.close()
 
@@ -490,22 +517,8 @@ async def on_message(update: Update, ctx):
                 else:
                     anchor_id = None
                     use_after = False
-                last_id = anchor_id
-                for btn in buttons:
-                    label = btn.get("label", "").strip()
-                    btype = btn.get("type", "menu")
-                    new_row = btn.get("new_row", True)
-                    if not label:
-                        continue
-                    if btype not in ("menu", "content"):
-                        btype = "menu"
-                    nr = 0 if not new_row else 1
-                    if last_id is None and not use_after:
-                        last_id = add_btn(pid, btype, label)
-                    else:
-                        last_id = add_btn_after(last_id, pid, btype, label, new_row=nr)
-                    use_after = True
-                    all_added.append(f"{'📂' if btype == 'menu' else '📄'} {label}")
+                created = _create_nested_buttons(pid, buttons, anchor_id=anchor_id, use_after=use_after)
+                all_added.extend(created)
             if all_added:
                 result_lines.append(f"✅ تمت إضافة {len(all_added)} زر:\n" +
                                     "\n".join(f"  • {a}" for a in all_added))
@@ -765,7 +778,23 @@ AI_SYSTEM_PROMPT = """أنت مساعد ذكي مدمج في بوت تلغرام
   "operations": [
     {
       "insert_after_index": -1,
-      "buttons": [{"label": "النص", "type": "menu", "new_row": true}]
+      "buttons": [
+        {
+          "label": "النص",
+          "type": "menu",
+          "new_row": true,
+          "children": [
+            {
+              "label": "زر فرعي",
+              "type": "menu",
+              "new_row": true,
+              "children": [
+                {"label": "محتوى", "type": "content", "new_row": true}
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }
@@ -786,10 +815,12 @@ operations: قائمة عمليات الإضافة — يمكن أن تكون ع
     "start" → أضف في بداية القائمة
     رقم     → أضف مباشرةً بعد الزر ذي هذا الفهرس
   buttons: الأزرار المراد إضافتها
-    label   → نص الزر
-    type    → "menu" يفتح قائمة فرعية | "content" يعرض محتوى
-    new_row → true: الزر يبدأ سطراً جديداً (يظهر تحت السابق)
-              false: الزر يكمل نفس سطر الزر السابق (يظهر بجانبه)
+    label    → نص الزر
+    type     → "menu" يفتح قائمة فرعية | "content" يعرض محتوى
+    new_row  → true: الزر يبدأ سطراً جديداً (يظهر تحت السابق)
+               false: الزر يكمل نفس سطر الزر السابق (يظهر بجانبه)
+    children → (اختياري) قائمة أزرار تُضاف داخل هذا الزر تلقائياً إذا كان type="menu"
+               يدعم التداخل بأي عمق — كل زر فرعي يمكن أن يحتوي children خاصة به
 
 ━━━ أمثلة توضيحية ━━━
 
@@ -813,6 +844,19 @@ operations: قائمة عمليات الإضافة — يمكن أن تكون ع
 
 مثال 5 — "استبدل زر X بـ Y":
   action: "delete_then_add"، delete_indices: [فهرسه]، operations تحتوي الزر الجديد
+
+مثال 6 — "أضف قائمة اسمها الخدمات وبداخلها زرين: دعم فني وشحن":
+  زر type="menu" label="الخدمات" مع children يحتويان الزرين الفرعيين:
+  {"label": "الخدمات", "type": "menu", "new_row": true, "children": [
+    {"label": "دعم فني", "type": "menu", "new_row": true},
+    {"label": "شحن", "type": "menu", "new_row": true}
+  ]}
+
+مثال 7 — بناء هيكل متداخل (قائمة > قوائم فرعية > محتوى):
+  المشرف: "أضف قائمة المنتجات بها ملابس وإلكترونيات، وداخل كل منها أضف 3 أزرار محتوى"
+  → قائمة "المنتجات" مع children:
+    - "ملابس" type="menu" مع children: [3 أزرار type="content"]
+    - "إلكترونيات" type="menu" مع children: [3 أزرار type="content"]
 
 ━━━ مفهوم السطر والموضع ━━━
 السياق يُظهر الأزرار مُجمَّعة في أسطر أفقية. كل سطر هو صف أفقي من الأزرار.
