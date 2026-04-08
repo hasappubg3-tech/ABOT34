@@ -30,15 +30,11 @@ BTN_MANAGE = "⚙️ إدارة"
 BTN_ADMINS = "👥 مشرفون"
 BTN_CANCEL = "❌ إلغاء"
 
-TYPE_MAP = {
-    "📂 قائمة":  "menu",
-    "📄 محتوى": "content",
-}
-
 BTN_SWAP = "🔀 تغيير"
 
 ADMIN_BTNS   = {BTN_ADMINS}
-SPECIAL_BTNS = {BTN_BACK, BTN_ADD, BTN_MANAGE, BTN_ADMINS, BTN_CANCEL, BTN_SWAP} | set(TYPE_MAP.keys())
+SPECIAL_BTNS = {BTN_BACK, BTN_ADD, BTN_MANAGE, BTN_ADMINS, BTN_CANCEL, BTN_SWAP,
+                "📂 قائمة", "📄 محتوى"}
 
 # ── قاعدة البيانات ────────────────────────────────────────────────
 def db():
@@ -313,33 +309,31 @@ def build_kb(uid, pid=None):
         rows.append([KeyboardButton(BTN_ADMINS)])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True) if (rows or is_admin(uid)) else None
 
-def build_type_kb():
-    return ReplyKeyboardMarkup([
-        ["📂 قائمة", "📄 محتوى"],
-        [BTN_CANCEL],
-    ], resize_keyboard=True)
-
 # ── لوحات Inline ─────────────────────────────────────────────────
 def kb_manage(pid=None):
     ctx = "r" if pid is None else str(pid)
     rows = []
     btns = get_buttons(pid)
-    if btns:
-        rows.append([InlineKeyboardButton("➕ إضافة في البداية", callback_data=f"add_first_{ctx}")])
     for b in btns:
         rows.append([
             InlineKeyboardButton(b['label'], callback_data=f"e_{b['id']}"),
             InlineKeyboardButton("🗑", callback_data=f"x_{b['id']}"),
-            InlineKeyboardButton("➕↕", callback_data=f"add_after_{b['id']}"),
-            InlineKeyboardButton("➕↔", callback_data=f"add_same_{b['id']}"),
+            InlineKeyboardButton("➕", callback_data=f"plus_{b['id']}"),
         ])
-    rows.append([InlineKeyboardButton("➕ إضافة في النهاية", callback_data=f"add_{ctx}")])
+    rows.append([InlineKeyboardButton("➕ إضافة", callback_data=f"plus_e_{ctx}")])
     if len(btns) >= 2:
         rows.append([InlineKeyboardButton("🔀 تبديل موضع زرين", callback_data=f"swp_start_{ctx}")])
     if pid is not None:
         b = get_btn(pid); back = b["parent_id"] if b else None
         rows.append([InlineKeyboardButton("🔙 رجوع", callback_data="m_r" if back is None else f"m_{back}")])
     return InlineKeyboardMarkup(rows)
+
+def kb_add_type():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📂 قائمة", callback_data="pt_m"),
+        InlineKeyboardButton("📄 محتوى", callback_data="pt_c"),
+        InlineKeyboardButton("❌ إلغاء", callback_data="pt_cancel"),
+    ]])
 
 def kb_swap_select(pid=None, first_bid=None):
     """لوحة اختيار الزر للتبديل — بنفس تخطيط الأزرار الأصلي."""
@@ -462,27 +456,20 @@ async def on_message(update: Update, ctx):
             await m.reply_text("⚠️ أرسل نصاً صحيحاً للاسم."); return
         t = ctx.user_data.get("new_type"); add_pid = ctx.user_data.get("add_pid")
         add_after = ctx.user_data.get("add_after", "END")
-        add_position = ctx.user_data.get("add_position")
-        add_same_row = ctx.user_data.get("add_same_row", False)
-        if add_position == "first":
-            bid = add_btn_after(None, add_pid, t, text)
-        elif add_after != "END":
-            bid = add_btn_after(add_after, add_pid, t, text, new_row=0 if add_same_row else 1)
+        if add_after != "END":
+            bid = add_btn_after(add_after, add_pid, t, text)
         else:
             bid = add_btn(add_pid, t, text)
         ctx.user_data.pop("state", None); ctx.user_data.pop("new_type", None)
-        ctx.user_data.pop("add_after", None); ctx.user_data.pop("add_position", None)
-        ctx.user_data.pop("add_same_row", None)
-        if t == "menu":
-            await m.reply_text(f"✅ تم إنشاء القائمة *{text}*", parse_mode="Markdown",
-                               reply_markup=build_kb(uid, pid))
-        else:
-            # content button: create and open its management panel
-            await m.reply_text(f"✅ تم إنشاء الزر *{text}*\n\nيمكنك الآن إضافة المحتوى:",
-                               parse_mode="Markdown", reply_markup=build_kb(uid, pid))
+        ctx.user_data.pop("add_after", None); ctx.user_data.pop("add_pid", None)
+        await m.reply_text(f"✅ تم إنشاء *{text}*", parse_mode="Markdown",
+                           reply_markup=build_kb(uid, pid))
+        if t == "content":
             await set_panel(ctx, chat_id,
                             f"📄 *{text}*\n\nلا يوجد محتوى بعد. اضغط ➕ لإضافة محتوى.",
                             kb_content_panel(bid))
+        else:
+            await set_panel(ctx, chat_id, f"📂 *{text}*", kb_manage(bid))
         return
 
     # ── انتظار محتوى جديد لزر موجود ──────────────────────────────
@@ -611,11 +598,6 @@ async def on_message(update: Update, ctx):
         await m.reply_text("🔄", reply_markup=build_kb(uid, pid))
         return
 
-    # ── اختيار نوع الزر ───────────────────────────────────────────
-    if state == "wait_type" and text in TYPE_MAP:
-        t = TYPE_MAP[text]; ctx.user_data["new_type"] = t; ctx.user_data["state"] = "wait_label"
-        await m.reply_text("✏️ اكتب اسم الزر:", reply_markup=build_kb(uid, pid))
-        return
 
     # ── إلغاء ─────────────────────────────────────────────────────
     if text == BTN_CANCEL:
@@ -756,37 +738,31 @@ async def cb_manage(update: Update, ctx):
         await q.message.reply_text("✅ تم الحذف.", reply_markup=build_kb(uid, pid))
         return
 
-    # ── إضافة بجانب زر (نفس السطر) ──────────────────────────────
-    if d.startswith("add_same_"):
-        after_bid = int(d[9:]); b = get_btn(after_bid)
-        ctx.user_data["state"] = "wait_type"
-        ctx.user_data["add_pid"] = b["parent_id"] if b else None
-        ctx.user_data["add_after"] = after_bid
-        ctx.user_data["add_same_row"] = True
-        ctx.user_data.pop("add_position", None)
-        await q.message.reply_text("اختر نوع الزر:", reply_markup=build_type_kb()); return
-
-    # ── إضافة من لوحة الإدارة (في النهاية) ──────────────────────
-    if d.startswith("add_after_"):
-        after_bid = int(d[10:]); b = get_btn(after_bid)
-        ctx.user_data["state"] = "wait_type"
-        ctx.user_data["add_pid"] = b["parent_id"] if b else None
-        ctx.user_data["add_after"] = after_bid
-        await q.message.reply_text("اختر نوع الزر:", reply_markup=build_type_kb()); return
-
-    if d.startswith("add_first_"):
-        pctx = d[10:]; ep = None if pctx == "r" else int(pctx)
-        ctx.user_data["state"] = "wait_type"
+    # ── زر + جنب زر موجود ────────────────────────────────────────
+    if d.startswith("plus_e_"):
+        pctx = d[7:]; ep = None if pctx == "r" else int(pctx)
         ctx.user_data["add_pid"] = ep
-        ctx.user_data["add_after"] = None          # None = في البداية
-        ctx.user_data["add_position"] = "first"
-        await q.message.reply_text("اختر نوع الزر:", reply_markup=build_type_kb()); return
+        ctx.user_data.pop("add_after", None)
+        await q.edit_message_text("اختر نوع الزر الجديد:", reply_markup=kb_add_type()); return
 
-    if d.startswith("add_"):
-        pctx = d[4:]; ep = None if pctx == "r" else int(pctx)
-        ctx.user_data["state"] = "wait_type"; ctx.user_data["add_pid"] = ep
-        ctx.user_data.pop("add_after", None); ctx.user_data.pop("add_position", None)
-        await q.message.reply_text("اختر نوع الزر:", reply_markup=build_type_kb()); return
+    if d.startswith("plus_"):
+        after_bid = int(d[5:]); b = get_btn(after_bid)
+        ctx.user_data["add_pid"] = b["parent_id"] if b else None
+        ctx.user_data["add_after"] = after_bid
+        await q.edit_message_text("اختر نوع الزر الجديد:", reply_markup=kb_add_type()); return
+
+    if d in ("pt_m", "pt_c"):
+        t = "menu" if d == "pt_m" else "content"
+        ctx.user_data["new_type"] = t
+        ctx.user_data["state"] = "wait_label"
+        await q.edit_message_text("✏️ اكتب اسم الزر الجديد:", reply_markup=kb_cancel_inline()); return
+
+    if d == "pt_cancel":
+        ctx.user_data.pop("state", None); ctx.user_data.pop("new_type", None)
+        ctx.user_data.pop("add_after", None); ctx.user_data.pop("add_pid", None)
+        cur_pid = ctx.user_data.get("pid")
+        await q.edit_message_text("⚙️ *إدارة الأزرار*:", parse_mode="Markdown",
+                                  reply_markup=kb_manage(cur_pid)); return
 
     # ── تعديل اسم الزر ───────────────────────────────────────────
     if d.startswith("el_"):
