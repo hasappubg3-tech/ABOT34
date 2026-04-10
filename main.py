@@ -129,6 +129,11 @@ def init_db():
             c.commit()
         except Exception:
             pass
+        try:
+            c.execute("ALTER TABLE user_stats ADD COLUMN pending_notif_bid INTEGER DEFAULT 0")
+            c.commit()
+        except Exception:
+            pass
 
 def is_admin(uid):
     return db().execute("SELECT 1 FROM admins WHERE id=?", (uid,)).fetchone() is not None
@@ -225,6 +230,22 @@ def mark_notif_sent(uid):
               (s.get("opens", 0), s.get("sessions", 0), uid))
     c.commit(); c.close()
 
+def set_pending_notif(uid, bid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET pending_notif_bid=? WHERE user_id=?", (bid, uid))
+    c.commit(); c.close()
+
+def clear_pending_notif(uid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET pending_notif_bid=0 WHERE user_id=?", (uid,))
+    c.commit(); c.close()
+
+def get_pending_notif(uid):
+    s = get_user_stats(uid)
+    return s.get("pending_notif_bid", 0) or 0
+
 def should_notify(uid) -> bool:
     msg = get_setting("notif_message", "")
     if not msg:
@@ -244,23 +265,34 @@ def should_notify(uid) -> bool:
     return False
 
 async def send_notif_gate(target, uid, bid):
-    """يُرسل رسالة التنبيه كبوابة inline — المستخدم يختار موافق أو إلغاء."""
-    msg          = get_setting("notif_message", "🔔 يرجى الاشتراك في قناتنا!")
-    chan         = get_setting("notif_channel", "").strip()
-    ok_text      = get_setting("notif_ok_text",     "✅ موافق")
-    cancel_text  = get_setting("notif_cancel_text",  "❌ إلغاء")
+    """يُرسل نافذة التنبيه المنبثقة — المستخدم لا يستطيع تجاوزها."""
+    msg         = get_setting("notif_message", "🔔 يرجى الاشتراك في قناتنا!")
+    chan        = get_setting("notif_channel", "").strip()
+    ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
+    cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
+
+    popup_text = (
+        "╔══════════════════╗\n"
+        "        🔔  *تنبيه مهم*  🔔\n"
+        "╚══════════════════╝\n\n"
+        f"{msg}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ _يجب الرد قبل الاستمرار_"
+    )
+
     rows = []
     if chan:
         url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
-        rows.append([InlineKeyboardButton("📢 اشترك بالقناة", url=url)])
+        rows.append([InlineKeyboardButton("📢 انضم للقناة الآن", url=url)])
     rows.append([
         InlineKeyboardButton(ok_text,     callback_data=f"notif_ok_{bid}"),
         InlineKeyboardButton(cancel_text, callback_data=f"notif_skip_{bid}"),
     ])
     markup = InlineKeyboardMarkup(rows)
     try:
-        await target.reply_text(msg, reply_markup=markup)
+        await target.reply_text(popup_text, parse_mode="Markdown", reply_markup=markup)
         mark_notif_sent(uid)
+        set_pending_notif(uid, bid)
     except Exception:
         pass
 
@@ -747,8 +779,43 @@ async def set_panel(ctx, chat_id, text, markup=None):
     msg = await ctx.bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
     ctx.user_data["panel_id"] = msg.message_id
 
+# ── إعادة إرسال نافذة التنبيه المعلقة (دون تحديث العداد) ─────────
+async def resend_notif_gate(target, uid, bid):
+    msg         = get_setting("notif_message", "🔔 يرجى الاشتراك في قناتنا!")
+    chan        = get_setting("notif_channel", "").strip()
+    ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
+    cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
+
+    popup_text = (
+        "╔══════════════════╗\n"
+        "        🔔  *تنبيه مهم*  🔔\n"
+        "╚══════════════════╝\n\n"
+        f"{msg}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ _يجب الرد قبل الاستمرار_"
+    )
+
+    rows = []
+    if chan:
+        url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
+        rows.append([InlineKeyboardButton("📢 انضم للقناة الآن", url=url)])
+    rows.append([
+        InlineKeyboardButton(ok_text,     callback_data=f"notif_ok_{bid}"),
+        InlineKeyboardButton(cancel_text, callback_data=f"notif_skip_{bid}"),
+    ])
+    markup = InlineKeyboardMarkup(rows)
+    try:
+        await target.reply_text(popup_text, parse_mode="Markdown", reply_markup=markup)
+    except Exception:
+        pass
+
 # ── عرض عناصر المحتوى للمستخدم ───────────────────────────────────
 async def send_items(m, bid, uid=None):
+    if uid:
+        pending_bid = get_pending_notif(uid)
+        if pending_bid:
+            await resend_notif_gate(m, uid, pending_bid)
+            return
     items = get_items(bid)
     if not items:
         await m.reply_text("📭 لا يوجد محتوى بعد.")
@@ -1247,10 +1314,35 @@ async def on_message(update: Update, ctx):
 
 # ── معالج أزرار Inline ────────────────────────────────────────────
 async def cb_manage(update: Update, ctx):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
     uid = q.from_user.id
+    d = q.data
+
+    # ── معالجة تنبيهات الاشتراك (لجميع المستخدمين) ───────────────
+    if d.startswith("notif_ok_") or d.startswith("notif_skip_"):
+        await q.answer()
+        clear_pending_notif(uid)
+        if d.startswith("notif_ok_"):
+            try:
+                await q.edit_message_text(
+                    "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await q.edit_message_text(
+                    "👌 *حسناً!*\n\nيمكنك الاستمرار في التصفح.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        return
+
+    await q.answer()
     if not is_admin(uid): return
-    d = q.data; chat_id = q.message.chat_id
+    chat_id = q.message.chat_id
     ctx.user_data["panel_id"] = q.message.message_id
     pid = ctx.user_data.get("pid")
 
