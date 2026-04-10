@@ -246,11 +246,14 @@ def get_pending_notif(uid):
     s = get_user_stats(uid)
     return s.get("pending_notif_bid", 0) or 0
 
-async def is_subscribed(bot, uid: int) -> bool:
-    """يتحقق إذا كان المستخدم مشتركاً في القناة المُعيَّنة."""
+async def is_subscribed(bot, uid: int):
+    """
+    يتحقق من اشتراك المستخدم في القناة.
+    يُرجع: True إذا مشترك، False إذا غير مشترك، None إذا تعذّر الفحص.
+    """
     chan = get_setting("notif_channel", "").strip()
     if not chan:
-        return False
+        return None
     try:
         if chan.startswith("http"):
             parts = chan.rstrip("/").split("/")
@@ -262,7 +265,7 @@ async def is_subscribed(bot, uid: int) -> bool:
         member = await bot.get_chat_member(channel_id, uid)
         return member.status in ("member", "administrator", "creator")
     except Exception:
-        return False
+        return None
 
 def should_notify(uid) -> bool:
     """النظام 1: هل يجب إظهار التنبيه المنبثق؟"""
@@ -830,15 +833,6 @@ async def resend_notif_gate(target, uid, bid):
     ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
     cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
 
-    popup_text = (
-        "╔══════════════════╗\n"
-        "        🔔  *تنبيه مهم*  🔔\n"
-        "╚══════════════════╝\n\n"
-        f"{msg}\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "⚠️ _يجب الرد قبل الاستمرار_"
-    )
-
     rows = []
     if chan:
         url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
@@ -849,7 +843,10 @@ async def resend_notif_gate(target, uid, bid):
     ])
     markup = InlineKeyboardMarkup(rows)
     try:
-        await target.reply_text(popup_text, parse_mode="Markdown", reply_markup=markup)
+        try:
+            await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            await target.reply_text(msg, reply_markup=markup)
     except Exception:
         pass
 
@@ -877,14 +874,15 @@ async def send_items(m, bid, uid=None, bot=None):
             return
 
         # فحص الاشتراك في القناة (مرة واحدة فقط)
-        subscribed = await is_subscribed(bot, uid) if bot else False
+        # True = مشترك | False = غير مشترك | None = تعذّر الفحص
+        subscribed = await is_subscribed(bot, uid) if bot else None
 
         # النظام 2: رسالة عادية مع كل محتوى للغير مشتركين
-        if not subscribed and should_notify_2():
+        if subscribed is False and should_notify_2():
             await send_notif2(m)
 
-        # النظام 1: تحديث العداد وفحص قبل إرسال المحتوى
-        if not subscribed:
+        # النظام 1: تحديث العداد وفحص قبل إرسال المحتوى (فقط إذا تأكدنا أنه غير مشترك)
+        if subscribed is False:
             inc_user_opens(uid)
             if should_notify(uid):
                 await send_notif_gate(m, uid, bid)
@@ -1402,8 +1400,9 @@ async def cb_manage(update: Update, ctx):
     if d.startswith("notif_ok_") or d.startswith("notif_skip_"):
         if d.startswith("notif_ok_"):
             # التحقق الفعلي من الاشتراك قبل السماح بالمتابعة
-            actually_subscribed = await is_subscribed(ctx.bot, uid)
-            if not actually_subscribed:
+            # True=مشترك | False=غير مشترك | None=تعذّر الفحص (نعطي صلاحية المرور)
+            sub_status = await is_subscribed(ctx.bot, uid)
+            if sub_status is False:
                 chan = get_setting("notif_channel", "").strip()
                 ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
                 cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
@@ -1422,11 +1421,12 @@ async def cb_manage(update: Update, ctx):
                 except Exception:
                     pass
                 return
+            # إما مشترك فعلاً أو تعذّر الفحص → نسمح بالمتابعة
             await q.answer()
             clear_pending_notif(uid)
             try:
                 await q.edit_message_text(
-                    "✅ *تم التحقق من اشتراكك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                    "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
                     parse_mode="Markdown"
                 )
             except Exception:
