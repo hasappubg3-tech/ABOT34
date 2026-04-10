@@ -101,6 +101,13 @@ def init_db():
                 url TEXT NOT NULL,
                 ord INTEGER DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS user_stats (
+                user_id   INTEGER PRIMARY KEY,
+                opens     INTEGER DEFAULT 0,
+                sessions  INTEGER DEFAULT 0,
+                last_notif_opens    INTEGER DEFAULT 0,
+                last_notif_sessions INTEGER DEFAULT 0
+            );
         """)
         try:
             c.execute("ALTER TABLE buttons ADD COLUMN new_row INTEGER DEFAULT 1")
@@ -119,6 +126,11 @@ def init_db():
             pass
         try:
             c.execute("ALTER TABLE buttons ADD COLUMN no_btn_caption INTEGER DEFAULT 0")
+            c.commit()
+        except Exception:
+            pass
+        try:
+            c.execute("ALTER TABLE user_stats ADD COLUMN pending_notif_bid INTEGER DEFAULT 0")
             c.commit()
         except Exception:
             pass
@@ -186,6 +198,128 @@ def build_caption_btn_markup(buttons):
     rows = [[InlineKeyboardButton(b["label"], url=b["url"])] for b in buttons]
     return InlineKeyboardMarkup(rows)
 
+# ── نظام التنبيهات ────────────────────────────────────────────────
+def _ensure_user_stats(uid):
+    c = db()
+    c.execute("INSERT OR IGNORE INTO user_stats(user_id) VALUES(?)", (uid,))
+    c.commit(); c.close()
+
+def get_user_stats(uid):
+    _ensure_user_stats(uid)
+    r = db().execute("SELECT * FROM user_stats WHERE user_id=?", (uid,)).fetchone()
+    return dict(r) if r else {}
+
+def inc_user_opens(uid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET opens=opens+1 WHERE user_id=?", (uid,))
+    c.commit(); c.close()
+    return db().execute("SELECT opens FROM user_stats WHERE user_id=?", (uid,)).fetchone()[0]
+
+def inc_user_sessions(uid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET sessions=sessions+1 WHERE user_id=?", (uid,))
+    c.commit(); c.close()
+    return db().execute("SELECT sessions FROM user_stats WHERE user_id=?", (uid,)).fetchone()[0]
+
+def mark_notif_sent(uid):
+    s = get_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET last_notif_opens=?, last_notif_sessions=? WHERE user_id=?",
+              (s.get("opens", 0), s.get("sessions", 0), uid))
+    c.commit(); c.close()
+
+def set_pending_notif(uid, bid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET pending_notif_bid=? WHERE user_id=?", (bid, uid))
+    c.commit(); c.close()
+
+def clear_pending_notif(uid):
+    _ensure_user_stats(uid)
+    c = db()
+    c.execute("UPDATE user_stats SET pending_notif_bid=0 WHERE user_id=?", (uid,))
+    c.commit(); c.close()
+
+def get_pending_notif(uid):
+    s = get_user_stats(uid)
+    return s.get("pending_notif_bid", 0) or 0
+
+async def is_subscribed(bot, uid: int):
+    """
+    يتحقق من اشتراك المستخدم في القناة.
+    يُرجع: True إذا مشترك، False إذا غير مشترك، None إذا تعذّر الفحص.
+    """
+    chan = get_setting("notif_channel", "").strip()
+    if not chan:
+        return None
+    try:
+        if chan.startswith("http"):
+            parts = chan.rstrip("/").split("/")
+            channel_id = f"@{parts[-1]}"
+        elif chan.startswith("-"):
+            channel_id = int(chan)
+        else:
+            channel_id = f"@{chan.lstrip('@')}"
+        member = await bot.get_chat_member(channel_id, uid)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return None
+
+def should_notify(uid) -> bool:
+    """النظام 1: هل يجب إظهار التنبيه المنبثق؟"""
+    chan = get_setting("notif_channel", "").strip()
+    if not chan:
+        return False
+    msg = get_setting("notif_message", "")
+    if not msg:
+        return False
+    enabled = get_setting("notif_enabled", "1")
+    if enabled != "1":
+        return False
+    s = get_user_stats(uid)
+    opens   = s.get("opens", 0)
+    last_op = s.get("last_notif_opens", 0)
+    try:
+        every_opens = int(get_setting("notif_every_opens", "5"))
+    except Exception:
+        every_opens = 5
+    if every_opens > 0 and opens > 0 and (opens - last_op) >= every_opens:
+        return True
+    return False
+
+def should_notify_2() -> bool:
+    """النظام 2: هل رسالة الاشتراك العادية مفعّلة؟"""
+    if get_setting("notif2_enabled", "0") != "1":
+        return False
+    return bool(get_setting("notif2_message", "").strip())
+
+async def send_notif_gate(target, uid, bid):
+    """يُرسل نافذة التنبيه المنبثقة — المستخدم لا يستطيع تجاوزها."""
+    msg         = get_setting("notif_message", "🔔 يرجى الاشتراك في قناتنا!")
+    chan        = get_setting("notif_channel", "").strip()
+    ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
+    cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
+
+    rows = []
+    if chan:
+        url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
+        rows.append([InlineKeyboardButton("📢 انضم للقناة الآن", url=url)])
+    rows.append([
+        InlineKeyboardButton(ok_text,     callback_data=f"notif_ok_{bid}"),
+        InlineKeyboardButton(cancel_text, callback_data=f"notif_skip_{bid}"),
+    ])
+    markup = InlineKeyboardMarkup(rows)
+    try:
+        try:
+            await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            await target.reply_text(msg, reply_markup=markup)
+        mark_notif_sent(uid)
+        set_pending_notif(uid, bid)
+    except Exception:
+        pass
 
 def get_buttons(pid=None):
     if pid is None:
@@ -692,8 +826,67 @@ async def set_panel(ctx, chat_id, text, markup=None):
     msg = await ctx.bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
     ctx.user_data["panel_id"] = msg.message_id
 
+# ── إعادة إرسال نافذة التنبيه المعلقة (دون تحديث العداد) ─────────
+async def resend_notif_gate(target, uid, bid):
+    msg         = get_setting("notif_message", "🔔 يرجى الاشتراك في قناتنا!")
+    chan        = get_setting("notif_channel", "").strip()
+    ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
+    cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
+
+    rows = []
+    if chan:
+        url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
+        rows.append([InlineKeyboardButton("📢 انضم للقناة الآن", url=url)])
+    rows.append([
+        InlineKeyboardButton(ok_text,     callback_data=f"notif_ok_{bid}"),
+        InlineKeyboardButton(cancel_text, callback_data=f"notif_skip_{bid}"),
+    ])
+    markup = InlineKeyboardMarkup(rows)
+    try:
+        try:
+            await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            await target.reply_text(msg, reply_markup=markup)
+    except Exception:
+        pass
+
+async def send_notif2(target):
+    """النظام 2: رسالة اشتراك عادية تُرسل مع كل محتوى للمشتركين."""
+    msg  = get_setting("notif2_message", "🔔 اشترك في قناتنا للاستمتاع بالمحتوى!")
+    chan = get_setting("notif_channel", "").strip()
+    rows = []
+    if chan:
+        url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
+        rows.append([InlineKeyboardButton("📢 اشترك في القناة", url=url)])
+    markup = InlineKeyboardMarkup(rows) if rows else None
+    try:
+        await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+    except Exception:
+        pass
+
 # ── عرض عناصر المحتوى للمستخدم ───────────────────────────────────
 async def send_items(m, bid, uid=None, bot=None):
+    if uid and not is_admin(uid):
+        # النظام 1: هل هناك تنبيه منبثق معلق؟
+        pending_bid = get_pending_notif(uid)
+        if pending_bid:
+            await resend_notif_gate(m, uid, pending_bid)
+            return
+
+        # فحص الاشتراك في القناة (مرة واحدة فقط)
+        # True = مشترك | False = غير مشترك | None = تعذّر الفحص
+        subscribed = await is_subscribed(bot, uid) if bot else None
+
+        # النظام 2: رسالة عادية مع كل محتوى للغير مشتركين
+        if subscribed is False and should_notify_2():
+            await send_notif2(m)
+
+        # النظام 1: تحديث العداد وفحص قبل إرسال المحتوى (فقط إذا تأكدنا أنه غير مشترك)
+        if subscribed is False:
+            inc_user_opens(uid)
+            if should_notify(uid):
+                await send_notif_gate(m, uid, bid)
+                return  # حجب المحتوى عند ظهور التنبيه المنبثق
 
     items = get_items(bid)
     if not items:
