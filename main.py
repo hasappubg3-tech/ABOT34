@@ -775,6 +775,24 @@ async def on_message(update: Update, ctx):
                 await set_panel(ctx, chat_id, "⚙️ *إدارة الأزرار*:", kb_manage(None))
         return
 
+    # ── حذف الكل ──────────────────────────────────────────────────
+    if not state and text == "حذف الكل" and is_admin(uid):
+        btns = get_buttons(pid)
+        if not btns:
+            await m.reply_text("⚠️ لا توجد أزرار في هذه القائمة.")
+            return
+        level_name = "القائمة الرئيسية" if pid is None else (get_btn(pid) or {}).get("label", "القائمة الحالية")
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ نعم، احذف الكل", callback_data=f"delall_{pid if pid is not None else 'r'}"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="cancel"),
+        ]])
+        await m.reply_text(
+            f"⚠️ هل تريد حذف جميع الأزرار ({len(btns)}) في *{level_name}*؟",
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+        return
+
     # ── أزرار المشرف ──────────────────────────────────────────────
     if is_admin(uid):
         if text.startswith(BTN_PLUS):
@@ -842,6 +860,20 @@ async def cb_manage(update: Update, ctx):
     if d == "cancel":
         ctx.user_data.pop("state", None)
         await q.edit_message_text("✅ تم الإلغاء."); return
+
+    # ── حذف الكل ──────────────────────────────────────────────────
+    if d.startswith("delall_"):
+        pctx = d[7:]
+        del_pid = None if pctx == "r" else int(pctx)
+        btns = get_buttons(del_pid)
+        count = len(btns)
+        for b in btns:
+            del_btn(b["id"])
+        ctx.user_data["pid"] = del_pid
+        level_name = "القائمة الرئيسية" if del_pid is None else (get_btn(del_pid) or {}).get("label", "القائمة الحالية")
+        await q.edit_message_text(f"🗑 تم حذف {count} زر من *{level_name}*.", parse_mode="Markdown")
+        await q.message.reply_text("🔄", reply_markup=build_kb(uid, del_pid))
+        return
 
     # ── إضافة سريعة (اضف) ─────────────────────────────────────────
     if d in ("qa_menu", "qa_content"):
