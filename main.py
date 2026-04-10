@@ -718,6 +718,55 @@ async def on_message(update: Update, ctx):
         return
 
 
+    # ── كليشة "اضف" لإضافة أزرار بتنسيق سريع ────────────────────
+    if not state and text.startswith("اضف") and is_admin(uid):
+        body = text[len("اضف"):].strip()
+        if not body:
+            await m.reply_text(
+                "💡 اكتب الأزرار بعد كلمة *اضف*، مثال:\n"
+                "```\n"
+                "اضف\n"
+                "زر 1 | زر 2\n"
+                "زر 3\n"
+                "```\n"
+                "الفاصلة | تضع الأزرار جنب بعض في نفس السطر.",
+                parse_mode="Markdown"
+            )
+            return
+        lines = [l.strip() for l in body.splitlines() if l.strip()]
+        if not lines:
+            await m.reply_text("⚠️ لم يتم العثور على أزرار.")
+            return
+        btn_type = "menu"
+        existing_btns = get_buttons(pid)
+        last_bid = existing_btns[-1]["id"] if existing_btns else None
+        first_add = (last_bid is None)
+        all_added = []
+        for line in lines:
+            parts = [p.strip() for p in line.split("|") if p.strip()]
+            for col_idx, label in enumerate(parts):
+                if not label:
+                    continue
+                is_new_row = (col_idx == 0)
+                nr = 1 if is_new_row else 0
+                if first_add:
+                    last_bid = add_btn(pid, btn_type, label)
+                    first_add = False
+                else:
+                    last_bid = add_btn_after(last_bid, pid, btn_type, label, new_row=nr)
+                all_added.append((label, is_new_row))
+        if all_added:
+            names = "\n".join(
+                f"  {'🔹' if nr else '  ▪️'} {lbl}" for lbl, nr in all_added
+            )
+            await m.reply_text(
+                f"✅ تم إضافة {len(all_added)} زر:\n{names}",
+                reply_markup=build_kb(uid, pid)
+            )
+        else:
+            await m.reply_text("⚠️ لم يتم إضافة أي زر.", reply_markup=build_kb(uid, pid))
+        return
+
     # ── إلغاء ─────────────────────────────────────────────────────
     if text == BTN_CANCEL:
         ctx.user_data.pop("state", None)
