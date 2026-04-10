@@ -115,6 +115,11 @@ def init_db():
         except Exception:
             pass
         try:
+            c.execute("ALTER TABLE buttons ADD COLUMN click_count INTEGER DEFAULT 0")
+            c.commit()
+        except Exception:
+            pass
+        try:
             c.execute("ALTER TABLE content_items ADD COLUMN local_path TEXT")
             c.commit()
         except Exception:
@@ -422,6 +427,11 @@ def add_btn_after(after_bid, pid, t, label, new_row=1):
 
 def upd_btn_label(bid, label):
     c = db(); c.execute("UPDATE buttons SET label=? WHERE id=?", (label, bid)); c.commit(); c.close()
+
+def inc_click_count(bid):
+    c = db()
+    c.execute("UPDATE buttons SET click_count=COALESCE(click_count,0)+1 WHERE id=?", (bid,))
+    c.commit(); c.close()
 
 def _create_nested_buttons(parent_id, buttons_list, anchor_id=None, use_after=False):
     """ينشئ قائمة أزرار داخل parent_id بشكل متداخل (يدعم children)."""
@@ -772,6 +782,7 @@ def kb_settings():
         [InlineKeyboardButton(capbtn_label,                      callback_data="st_capbtn")],
         [InlineKeyboardButton(f"📢 رسالة الاشتراك {notif1_icon}", callback_data="st_notif1")],
         [InlineKeyboardButton("📊 الإحصائيات",                   callback_data="st_stats")],
+        [InlineKeyboardButton("🔥 الملفات الترند",                callback_data="st_trending_0")],
     ])
 
 def kb_notif1_settings():
@@ -908,6 +919,45 @@ def get_stats() -> str:
         f"  └ حجم قاعدة البيانات: `{db_size_kb} KB`"
     )
 
+def get_trending_page(page: int, page_size: int = 10):
+    """يُرجع (قائمة الأزرار, إجمالي العدد) لصفحة معينة مرتّبة بالأكثر طلباً."""
+    offset = page * page_size
+    rows = db().execute(
+        "SELECT id, label, click_count FROM buttons WHERE type='content' AND COALESCE(click_count,0)>0 "
+        "ORDER BY click_count DESC LIMIT ? OFFSET ?",
+        (page_size, offset)
+    ).fetchall()
+    total = db().execute(
+        "SELECT COUNT(*) FROM buttons WHERE type='content' AND COALESCE(click_count,0)>0"
+    ).fetchone()[0]
+    return [dict(r) for r in rows], total
+
+def build_trending_text(page: int, page_size: int = 10) -> tuple:
+    """يبني النص ولوحة التنقل للترند. يُرجع (text, markup)."""
+    btns, total = get_trending_page(page, page_size)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if not btns:
+        text = "🔥 *الملفات الترند*\n\nلا توجد بيانات بعد.\nستظهر الأرقام بعد أن يبدأ المستخدمون بالضغط على الأزرار."
+    else:
+        start = page * page_size + 1
+        lines = []
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for i, b in enumerate(btns, start=start):
+            rank = i
+            icon = medals.get(rank, f"`{rank}`.")
+            lines.append(f"{icon} *{b['label']}* — `{b['click_count']}` طلب")
+        text = f"🔥 *الملفات الترند* — صفحة {page+1}/{total_pages}\n\n" + "\n".join(lines)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ السابق", callback_data=f"st_trending_{page-1}"))
+    if (page + 1) * page_size < total:
+        nav.append(InlineKeyboardButton("التالي ▶️", callback_data=f"st_trending_{page+1}"))
+    rows_kb = []
+    if nav:
+        rows_kb.append(nav)
+    rows_kb.append([InlineKeyboardButton("رجوع", callback_data="st_back")])
+    return text, InlineKeyboardMarkup(rows_kb)
+
 def kb_cancel_inline():
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data="cancel")]])
 
@@ -974,6 +1024,8 @@ async def send_items(m, bid, uid=None, bot=None):
     if not items:
         await m.reply_text("📭 لا يوجد محتوى بعد.")
         return
+    if uid and not is_admin(uid):
+        inc_click_count(bid)
     b = get_btn(bid)
     no_cap = (b.get("no_caption", 0) or 0) if b else 0
     extra_cap = get_global_caption() if not no_cap else ""
@@ -1611,6 +1663,12 @@ async def cb_manage(update: Update, ctx):
                                   reply_markup=InlineKeyboardMarkup([[
                                       InlineKeyboardButton("رجوع", callback_data="st_back")
                                   ]]))
+        return
+
+    if d.startswith("st_trending_"):
+        page = int(d[len("st_trending_"):])
+        text, markup = build_trending_text(page)
+        await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
         return
 
     if d == "st_back":
