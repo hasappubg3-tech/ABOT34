@@ -474,12 +474,12 @@ async def cb_manage(update: Update, ctx):
         await q.answer()
         questions = get_exam_questions(bid)
         if not questions:
-            await q.edit_message_text("📭 لا توجد أسئلة في هذا الامتحان بعد.")
+            await q.edit_message_text("📭 لا توجد أسئلة في هذا الاختبار بعد.")
             return
         import asyncio
         for n in ("3", "2", "1"):
             try:
-                await q.edit_message_text(f"⏳ يبدأ الامتحان خلال *{n}*", parse_mode="Markdown")
+                await q.edit_message_text(f"⏳ يبدأ الاختبار خلال *{n}*", parse_mode="Markdown")
             except Exception:
                 pass
             await asyncio.sleep(1)
@@ -519,7 +519,7 @@ async def cb_manage(update: Update, ctx):
         await q.answer()
         session = get_exam_session(ctx, bid)
         if not session:
-            await q.message.reply_text("⚠️ انتهت الجلسة. اضغط على زر الامتحان مجدداً للبدء.")
+            await q.message.reply_text("⚠️ انتهت الجلسة. اضغط على زر الاختبار مجدداً للبدء.")
             return
         try:
             current_idx = session["q_ids"].index(current_qid)

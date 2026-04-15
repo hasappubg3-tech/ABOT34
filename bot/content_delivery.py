@@ -376,10 +376,10 @@ def get_exam_session(ctx, bid):
 
 async def send_exam_ready(m, bid):
     b = get_btn(bid)
-    title = b["label"] if b else "الامتحان"
+    title = b["label"] if b else "الاختبار"
     questions = get_exam_questions(bid)
     await m.reply_text(
-        f"📝 *{title}*\n\n_{len(questions)} سؤال_\n\nهل أنت مستعد لبدء الامتحان؟",
+        f"📝 *{title}*\n\n_{len(questions)} سؤال_\n\nهل أنت مستعد لبدء الاختبار؟",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ نعم، مستعد!", callback_data=f"ex_start_{bid}")]
@@ -423,12 +423,12 @@ async def send_exam_answer_to_user(target, bid, qid, current_idx, total):
     is_last = (current_idx + 1 >= total)
     if is_last:
         next_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🏁 إنهاء الامتحان", callback_data=f"ex_finish_{bid}")]
+            [InlineKeyboardButton("🏁 إنهاء الاختبار", callback_data=f"ex_finish_{bid}")]
         ])
     else:
         next_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("➡️ السؤال التالي", callback_data=f"ex_next_{bid}_{qid}")],
-            [InlineKeyboardButton("🏁 إنهاء الامتحان", callback_data=f"ex_finish_{bid}")],
+            [InlineKeyboardButton("🏁 إنهاء الاختبار", callback_data=f"ex_finish_{bid}")],
         ])
     a_type = q.get("a_type", "text")
     a_text = q.get("a_text")

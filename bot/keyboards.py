@@ -143,7 +143,7 @@ def kb_add_type():
         ],
         [
             InlineKeyboardButton("📊 كويز", callback_data="pt_q"),
-            InlineKeyboardButton("📝 امتحان", callback_data="pt_e"),
+            InlineKeyboardButton("📝 اختبار", callback_data="pt_e"),
         ],
         [
             InlineKeyboardButton("⭐ مميز (للمشرفين فقط)", callback_data="pt_s"),
