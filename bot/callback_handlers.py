@@ -1480,7 +1480,7 @@ async def cb_manage(update: Update, ctx):
         if not items:
             return
         for item in items:
-            await send_file_item(q.message, item, reply_markup=kb_item_actions(item["id"]))
+            await send_file_item(q.message, item, reply_markup=kb_item_actions(item["id"]), bot=ctx.bot)
         return
 
     # ── تغيير وصف عنصر ───────────────────────────────────────────

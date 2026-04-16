@@ -64,7 +64,7 @@ async def upload_item_to_channel(bot, item) -> int | None:
         return await upload_to_channel(bot, fid, file_type, caption)
     return None
 
-async def send_file_item(target, item, reply_markup=None, extra_caption=""):
+async def send_file_item(target, item, reply_markup=None, extra_caption="", bot=None):
     t = item["type"]
     fid = item.get("file_id")
     cap = item.get("content") or ""
@@ -81,8 +81,17 @@ async def send_file_item(target, item, reply_markup=None, extra_caption=""):
         ch = get_storage_channel_id()
         if not channel_msg_id or not ch:
             return None
+        copy_bot = bot
+        if copy_bot is None and hasattr(target, "get_bot"):
+            try:
+                copy_bot = target.get_bot()
+            except Exception:
+                copy_bot = None
+        if copy_bot is None:
+            logging.warning("فشل الإرسال من القناة: لا يوجد كائن بوت للنسخ")
+            return None
         try:
-            return await target.bot.copy_message(
+            return await copy_bot.copy_message(
                 chat_id=target.chat_id,
                 from_chat_id=ch,
                 message_id=channel_msg_id,
@@ -257,7 +266,7 @@ async def send_items(m, bid, uid=None, bot=None):
     unified = (b.get("unified_rating", 0) or 0) if b else 0
     ratings_hidden = get_user_ratings_hidden(uid) if uid and not is_admin(uid) else False
     for item in items:
-        sent = await send_file_item(m, item, extra_caption=extra_cap, reply_markup=link_markup)
+        sent = await send_file_item(m, item, extra_caption=extra_cap, reply_markup=link_markup, bot=bot)
         if sent and uid and not is_admin(uid) and not unified and not ratings_hidden:
             await send_item_rating_message(m, item, uid=uid)
 
