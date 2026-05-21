@@ -280,6 +280,24 @@ def clone_btn(source_bid, pid, add_after="END", add_before=None, new_row=1):
                     "channel_msg_id": item.get("channel_msg_id"), "ord": item.get("ord", 1)
                 })
 
+    elif t in ("menu", "exam_group"):
+        # استنساخ عميق — يكرر نفسه لكل زر داخلي بأي عمق
+        children = list(_col("buttons").find(
+            {"parent_id": source_bid, "deleted": {"$ne": 1}}
+        ).sort([("ord", 1), ("id", 1)]))
+        last_cloned_child = None
+        for child in children:
+            if last_cloned_child is None:
+                child_new_id = clone_btn(child["id"], new_bid)
+            else:
+                child_new_id = clone_btn(
+                    child["id"], new_bid,
+                    add_after=last_cloned_child,
+                    new_row=child.get("new_row", 1)
+                )
+            if child_new_id:
+                last_cloned_child = child_new_id
+
     return new_bid
 
 def get_compound_text(bid):

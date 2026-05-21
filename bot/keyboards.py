@@ -174,6 +174,9 @@ def kb_add_type():
             InlineKeyboardButton("⭐ مميز (للمشرفين فقط)", callback_data="pt_s"),
         ],
         [
+            InlineKeyboardButton("♻️ استنساخ زر موجود", callback_data="pt_clone"),
+        ],
+        [
             InlineKeyboardButton("❌ إلغاء", callback_data="pt_cancel"),
         ],
     ])

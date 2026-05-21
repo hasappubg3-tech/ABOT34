@@ -1635,6 +1635,17 @@ async def cb_manage(update: Update, ctx):
         ctx.user_data["state"] = "wait_label"
         await q.edit_message_text("✏️ اكتب اسم الزر الجديد:", reply_markup=kb_cancel_inline()); return
 
+    if d == "pt_clone":
+        ctx.user_data["state"] = "wait_clone_id"
+        await q.edit_message_text(
+            "♻️ *استنساخ زر*\n\n"
+            "أرسل *رقم الزر* (ID) المراد استنساخه:\n"
+            "_(يمكن استنساخ أي زر حتى لو كان محذوفاً — سيُنسخ مع كامل محتواه وأزراره الداخلية)_",
+            parse_mode="Markdown",
+            reply_markup=kb_cancel_inline()
+        )
+        return
+
     if d == "pt_cancel":
         ctx.user_data.pop("state", None); ctx.user_data.pop("new_type", None)
         ctx.user_data.pop("add_after", None); ctx.user_data.pop("add_pid", None)
