@@ -204,11 +204,13 @@ async def cb_manage(update: Update, ctx):
                 await q.answer("⚠️ التعليق غير موجود.", show_alert=True); return
             await q.answer()
             user_reaction = get_user_reaction(cid, uid)
+            can_delete = (uid == cmt.get("user_id")) or is_admin(uid)
             await q.edit_message_text(
                 f"💬 *تعليق:*\n\n{cmt['text']}",
                 parse_mode="Markdown",
                 reply_markup=kb_comment_view(target_type, target_id, cid,
-                                             cmt.get("likes", 0), cmt.get("dislikes", 0), user_reaction)
+                                             cmt.get("likes", 0), cmt.get("dislikes", 0),
+                                             user_reaction, can_delete=can_delete)
             )
             return
 
@@ -228,12 +230,37 @@ async def cb_manage(update: Update, ctx):
                 await q.answer("⚠️ التعليق غير موجود.", show_alert=True); return
             await q.answer("✅")
             user_reaction = get_user_reaction(cid, uid)
+            can_delete = (uid == updated.get("user_id")) or is_admin(uid)
             await q.edit_message_text(
                 f"💬 *تعليق:*\n\n{updated['text']}",
                 parse_mode="Markdown",
                 reply_markup=kb_comment_view(target_type, target_id, cid,
-                                             updated.get("likes", 0), updated.get("dislikes", 0), user_reaction)
+                                             updated.get("likes", 0), updated.get("dislikes", 0),
+                                             user_reaction, can_delete=can_delete)
             )
+            return
+
+        # ── حذف تعليق ──
+        if d.startswith("cmt_del_"):
+            # cmt_del_item_123_456
+            rest = d[len("cmt_del_"):]
+            parts = rest.split("_")
+            target_type = parts[0]
+            cid = int(parts[-1])
+            target_id = int(parts[-2])
+            cmt = get_comment(cid)
+            if not cmt:
+                await q.answer("⚠️ التعليق غير موجود.", show_alert=True); return
+            if uid != cmt.get("user_id") and not is_admin(uid):
+                await q.answer("⛔ ليس لديك صلاحية حذف هذا التعليق.", show_alert=True); return
+            delete_comment(cid)
+            await q.answer("✅ تم حذف التعليق.")
+            comments = get_comments(target_type, target_id)
+            label = "الملف" if target_type == "item" else "المحتوى"
+            text = f"💬 تعليقات {label}\n\nعدد التعليقات: {len(comments)}"
+            if not comments:
+                text += "\n\nلا يوجد تعليقات بعد، كن أول من يعلّق! 🙂"
+            await q.edit_message_text(text, reply_markup=kb_comments_list(target_type, target_id))
             return
 
         # ── إضافة تعليق ──

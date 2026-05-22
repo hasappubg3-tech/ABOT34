@@ -706,16 +706,24 @@ def kb_comments_list(target_type: str, target_id: int) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"cmt_back_{target_type}_{target_id}")])
     return InlineKeyboardMarkup(rows)
 
-def kb_comment_view(target_type: str, target_id: int, cid: int, likes: int, dislikes: int, user_reaction) -> InlineKeyboardMarkup:
+def delete_comment(cid: int):
+    _col("comment_reactions").delete_many({"comment_id": cid})
+    _col("comments").delete_one({"id": cid})
+
+def kb_comment_view(target_type: str, target_id: int, cid: int, likes: int, dislikes: int,
+                    user_reaction, can_delete: bool = False) -> InlineKeyboardMarkup:
     like_lbl = f"👍 {likes}" + (" ✅" if user_reaction == "like" else "")
     dis_lbl = f"👎 {dislikes}" + (" ✅" if user_reaction == "dislike" else "")
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton(like_lbl, callback_data=f"cmt_react_{target_type}_{target_id}_{cid}_like"),
             InlineKeyboardButton(dis_lbl, callback_data=f"cmt_react_{target_type}_{target_id}_{cid}_dislike"),
         ],
-        [InlineKeyboardButton("🔙 رجوع", callback_data=f"cmts_{target_type}_{target_id}")],
-    ])
+    ]
+    if can_delete:
+        rows.append([InlineKeyboardButton("🗑 حذف التعليق", callback_data=f"cmt_del_{target_type}_{target_id}_{cid}")])
+    rows.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"cmts_{target_type}_{target_id}")])
+    return InlineKeyboardMarkup(rows)
 
 # ── الإحصائيات ───────────────────────────────────────────────────
 def _today_str():
