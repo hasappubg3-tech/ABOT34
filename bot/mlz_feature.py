@@ -30,17 +30,31 @@ async def _call_gemini_text(prompt: str) -> str | None:
     return None
 
 # ── استخراج المعلومات الأربع بالذكاء الاصطناعي ───────────────────
+def _clean_source_text(text: str) -> str:
+    """يُنظّف النص من الرموز الزخرفية قبل إرساله لـ Gemini."""
+    # استبدال رموز الزخرفة والفواصل الزخرفية بمسافة
+    cleaned = _re.sub(r'[✧✦✩✪✫✬✭✮✯✰★☆⭐━─═●○◆◇■□▪▫»«]+', ' ', text)
+    # حذف الروابط
+    cleaned = _re.sub(r'https?://\S+', '', cleaned)
+    # تقليل المسافات المتعددة
+    cleaned = _re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 async def extract_mlz_info(source_text: str) -> dict:
+    cleaned_text = _clean_source_text(source_text)
     prompt = (
-        "استخرج من النص التالي أربع معلومات بالضبط:\n"
-        "1. المادة الدراسية (مثل: كيمياء، فيزياء، رياضيات، أحياء، عربي)\n"
-        "2. اسم المدرس كاملاً\n"
-        "3. الصف الدراسي (مثل: السادس علمي، السادس أدبي، الخامس علمي، الثالث متوسط)\n"
-        "4. سنة الإصدار (أربعة أرقام مثل 2025)\n\n"
-        f"النص: {source_text}\n\n"
-        "أرجع JSON فقط بدون أي نص إضافي:\n"
-        '{"subject": "", "teacher": "", "grade": "", "year": ""}\n'
-        "إذا لم تجد معلومة اتركها فارغة تماماً."
+        "أنت مساعد يستخرج معلومات من نصوص عربية مزخرفة أو عادية.\n\n"
+        "استخرج هذه المعلومات من النص:\n"
+        "1. المادة الدراسية: اسم المادة (مثل: رياضيات، كيمياء، فيزياء، قواعد، أحياء، عربي، تاريخ، جغرافية، دين، انجليزي)\n"
+        "2. اسم المدرس: الاسم الكامل للأستاذ أو المدرس (يأتي بعد كلمة 'الأستاذ' أو 'أ.' أو 'المدرس')\n"
+        "3. الصف الدراسي: مثل (السادس الإعدادي، السادس علمي، السادس أدبي، الخامس علمي، الثالث متوسط، الأول ثانوي)\n"
+        "4. سنة الإصدار: أربعة أرقام (مثل 2025، 2026، 2027)\n\n"
+        f"النص:\n{cleaned_text}\n\n"
+        "قواعد مهمة:\n"
+        "- أرجع JSON فقط بدون أي شرح\n"
+        "- إذا لم تجد معلومة اتركها فارغة ''\n"
+        "- لا تخترع معلومات غير موجودة\n"
+        '{"subject": "", "teacher": "", "grade": "", "year": ""}'
     )
     try:
         raw = await _call_gemini_text(prompt)
@@ -60,8 +74,8 @@ def _norm(text: str) -> str:
     text = (text or "").strip()
     # حذف كل ما ليس حرفاً عربياً أو لاتينياً أو رقماً أو مسافة
     text = _re.sub(r'[^\u0600-\u06FFa-zA-Z0-9\s]', ' ', text)
-    # حذف التشكيل
-    text = _re.sub(r'[\u064B-\u065F\u0670]', '', text)
+    # حذف التشكيل والتطويل (kashida \u0640) والأرقام العربية الموصولة
+    text = _re.sub(r'[\u064B-\u065F\u0670\u0640]', '', text)
     text = text.replace('ة', 'ه').replace('ى', 'ي')
     text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
     return _re.sub(r'\s+', ' ', text).strip().lower()
@@ -128,7 +142,7 @@ def find_or_build_mlz_path(grade: str, subject: str, teacher: str):
         return None, None, None, None
 
     grade_children = get_buttons(grade_btn['id'])
-    mlz_keywords = ['ملزم', 'ملازم']
+    mlz_keywords = ['ملزم', 'ملازم', 'ملزمه', 'ملازمه', 'ملازمات', 'ملزمات']
     mlz_btn = None
     for b in grade_children:
         lbl_n = _norm(b['label'])
@@ -330,9 +344,10 @@ async def after_mlz_confirm(q, ctx, uid, chat_id):
         return
 
     grade_children = get_buttons(grade_btn['id'])
+    _mlz_kw = ['ملزم', 'ملازم', 'ملزمه', 'ملازمه', 'ملازمات', 'ملزمات']
     mlz_btn = None
     for b in grade_children:
-        if any(kw in _norm(b['label']) for kw in ['ملزم', 'ملازم']):
+        if any(kw in _norm(b['label']) for kw in _mlz_kw):
             mlz_btn = b
             break
     if not mlz_btn:
