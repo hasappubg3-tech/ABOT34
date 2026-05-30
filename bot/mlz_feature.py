@@ -18,23 +18,15 @@ def _is_clear_subject(subject: str) -> bool:
 
 def _strip_emoji(text: str) -> str:
     """يُزيل الرموز التعبيرية والأيقونات من النص."""
-    if not text:
-        return text
-    import unicodedata
-    result = []
-    for ch in text:
-        cp = ord(ch)
-        cat = unicodedata.category(ch)
-        # احتفظ بالحروف العربية واللاتينية والأرقام والمسافات وعلامات الترقيم الأساسية
-        if (cat.startswith('L') or          # حروف
-                cat.startswith('N') or      # أرقام
-                cat == 'Zs' or             # مسافات
-                cat == 'Pd' or             # شرطة
-                cat == 'Po' or             # ترقيم
-                ch in ' \n\t:-|/()،,.'    # محارف مسموحة
-        ):
-            result.append(ch)
-    cleaned = ''.join(result)
+    cleaned = _re.sub(
+        r'[\U0001F000-\U0001FFFF'
+        r'\U00002700-\U000027BF'
+        r'\U00002600-\U000026FF'
+        r'\U00002300-\U000023FF'
+        r'\U00002B00-\U00002BFF'
+        r'\uFE00-\uFE0F]+',
+        '', text
+    )
     return _re.sub(r'\s+', ' ', cleaned).strip()
 
 _TYPE_KEYWORDS = {
@@ -343,10 +335,11 @@ def find_or_build_mlz_path(grade: str, subject: str, teacher: str):
 
 def _build_desc(subject, teacher, grade, year, part=''):
     part_str = f" الجزء {part}" if part else ""
+    clean_grade = _strip_emoji(grade)
     return (
-        f"⚜️ | ملزمة {_strip_emoji(subject)}{part_str}\n"
-        f"⚜️ | للاستاذ {_strip_emoji(teacher)}\n"
-        f"⚜️ | {_strip_emoji(grade)}\n"
+        f"⚜️ | ملزمة {subject}{part_str}\n"
+        f"⚜️ | للاستاذ {teacher}\n"
+        f"⚜️ | {clean_grade}\n"
         f"⚜️ | سنة الاصدار : {year}\n"
         f"⚜️ | دقة عالية قابلة للسحب"
     )
@@ -620,7 +613,7 @@ async def after_mlz_confirm(q, ctx, uid, chat_id):
 
     # مادة واضحة + تطابق موجود → تابع مباشرة
     if matched and _is_clear_subject(subject):
-        ctx.user_data['mlz_subject'] = _strip_emoji(matched['label'])
+        ctx.user_data['mlz_subject'] = matched['label']
         await q.answer()
         try:
             await q.message.delete()
@@ -665,7 +658,7 @@ async def after_mlz_subject_pick(q, ctx, uid, chat_id, bid: int):
     if not btn:
         await q.answer("⚠️ الزر غير موجود.", show_alert=True)
         return
-    ctx.user_data['mlz_subject'] = _strip_emoji(btn['label'])
+    ctx.user_data['mlz_subject'] = btn['label']
     await q.answer(f"✅ {btn['label']}")
     await _delete_picker(ctx.bot, ctx, q.message.chat_id)
     panel_mid = ctx.user_data.pop('mlz_panel_mid', None)
@@ -715,7 +708,7 @@ async def after_mlz_grade_pick(q, ctx, bid: int):
     if not btn:
         await q.answer("⚠️ الزر غير موجود.", show_alert=True)
         return
-    ctx.user_data['mlz_grade'] = _strip_emoji(btn['label'])
+    ctx.user_data['mlz_grade'] = btn['label']
     await q.answer(f"✅ {btn['label']}")
     await _delete_picker(ctx.bot, ctx, q.message.chat_id)
     await _refresh_mlz_panel(ctx.bot, ctx)
