@@ -343,11 +343,10 @@ def find_or_build_mlz_path(grade: str, subject: str, teacher: str):
 
 def _build_desc(subject, teacher, grade, year, part=''):
     part_str = f" الجزء {part}" if part else ""
-    clean_grade = _strip_emoji(grade)
     return (
-        f"⚜️ | ملزمة {subject}{part_str}\n"
-        f"⚜️ | للاستاذ {teacher}\n"
-        f"⚜️ | {clean_grade}\n"
+        f"⚜️ | ملزمة {_strip_emoji(subject)}{part_str}\n"
+        f"⚜️ | للاستاذ {_strip_emoji(teacher)}\n"
+        f"⚜️ | {_strip_emoji(grade)}\n"
         f"⚜️ | سنة الاصدار : {year}\n"
         f"⚜️ | دقة عالية قابلة للسحب"
     )
@@ -621,7 +620,7 @@ async def after_mlz_confirm(q, ctx, uid, chat_id):
 
     # مادة واضحة + تطابق موجود → تابع مباشرة
     if matched and _is_clear_subject(subject):
-        ctx.user_data['mlz_subject'] = matched['label']
+        ctx.user_data['mlz_subject'] = _strip_emoji(matched['label'])
         await q.answer()
         try:
             await q.message.delete()
@@ -666,7 +665,7 @@ async def after_mlz_subject_pick(q, ctx, uid, chat_id, bid: int):
     if not btn:
         await q.answer("⚠️ الزر غير موجود.", show_alert=True)
         return
-    ctx.user_data['mlz_subject'] = btn['label']
+    ctx.user_data['mlz_subject'] = _strip_emoji(btn['label'])
     await q.answer(f"✅ {btn['label']}")
     await _delete_picker(ctx.bot, ctx, q.message.chat_id)
     panel_mid = ctx.user_data.pop('mlz_panel_mid', None)
@@ -716,7 +715,7 @@ async def after_mlz_grade_pick(q, ctx, bid: int):
     if not btn:
         await q.answer("⚠️ الزر غير موجود.", show_alert=True)
         return
-    ctx.user_data['mlz_grade'] = btn['label']
+    ctx.user_data['mlz_grade'] = _strip_emoji(btn['label'])
     await q.answer(f"✅ {btn['label']}")
     await _delete_picker(ctx.bot, ctx, q.message.chat_id)
     await _refresh_mlz_panel(ctx.bot, ctx)
