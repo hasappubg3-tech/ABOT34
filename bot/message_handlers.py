@@ -982,9 +982,28 @@ async def on_message(update: Update, ctx):
         except ValueError:
             await m.reply_text("⚠️ أرسل رقماً بين 1 و 60."); return
         ctx.user_data["ses_break_time"] = val
+        ctx.user_data["state"] = "wait_ses_room_name_create"
+        user_obj = update.effective_user
+        uname = user_obj.first_name or user_obj.username or str(uid)
+        await m.reply_text(
+            f"✅ الاستراحة: *{val} دقيقة*\n\n✏️ أرسل *اسم الغرفة* أو استخدم اسمك الخاص:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"👤 استخدم اسمي ({uname})",
+                                      callback_data="ses_name_skip")],
+                [InlineKeyboardButton("❌ إلغاء", callback_data="ses_menu")],
+            ]),
+        )
+        return
+
+    if state == "wait_ses_room_name_create":
+        name = text.strip()[:30]
+        if not name:
+            await m.reply_text("⚠️ أرسل اسماً صحيحاً."); return
+        ctx.user_data["ses_room_name"] = name
         ctx.user_data.pop("state", None)
         await m.reply_text(
-            f"✅ وقت الاستراحة: *{val} دقيقة*\n\nهل الغرفة عامة أم خاصة؟",
+            f"✅ اسم الغرفة: *{name}*\n\nهل الغرفة عامة أم خاصة؟",
             parse_mode="Markdown",
             reply_markup=kb_ses_privacy(),
         )
@@ -996,22 +1015,72 @@ async def on_message(update: Update, ctx):
             await m.reply_text("⚠️ الرمز قصير جداً (حرفان على الأقل)."); return
         study = ctx.user_data.pop("ses_study_time", None)
         brk   = ctx.user_data.pop("ses_break_time", None)
+        name  = ctx.user_data.pop("ses_room_name", None)
         ctx.user_data.pop("state", None)
         if not study or not brk:
             await m.reply_text("⚠️ انتهت جلسة الإنشاء. ابدأ من جديد."); return
-        user_obj  = update.effective_user
+        user_obj = update.effective_user
         uname = user_obj.first_name or user_obj.username or str(uid)
-        rid  = ses_create_room(uid, uname, study, brk, password=pw)
+        rid  = ses_create_room(uid, uname, study, brk, password=pw,
+                               custom_name=name or uname)
         room = ses_get_room(rid)
         pts  = ses_get_participants(rid)
         await m.reply_text(
             f"✅ *تم إنشاء الغرفة المقفلة!*\n\n"
+            f"🏠 الاسم: *{room['name']}*\n"
             f"🔒 الرمز السري: `{pw}`\n\n"
             f"📚 {study}د دراسة | ☕ {brk}د استراحة\n"
             f"👥 المشاركون: *{len(pts)}*\n\n"
             "شارك الرمز مع الأصدقاء، ثم اضغط *بدء الجلسة* عندما يكون الجميع جاهزاً.",
             parse_mode="Markdown",
             reply_markup=kb_ses_room(room, uid, True),
+        )
+        return
+
+    if state == "wait_ses_rename":
+        new_name = text.strip()[:30]
+        if not new_name:
+            await m.reply_text("⚠️ أرسل اسماً صحيحاً."); return
+        rid = ctx.user_data.pop("ses_rename_rid", None)
+        ctx.user_data.pop("state", None)
+        if not rid:
+            await m.reply_text("⚠️ انتهت العملية. حاول مرة ثانية."); return
+        ses_rename_room(rid, new_name)
+        room = ses_get_room(rid)
+        open_ = room.get("comments_open", True) if room else True
+        await m.reply_text(
+            f"✅ تم تغيير اسم الغرفة إلى: *{new_name}*",
+            parse_mode="Markdown",
+            reply_markup=kb_ses_settings(rid, open_),
+        )
+        return
+
+    if state == "wait_ses_chat":
+        rid = ctx.user_data.pop("ses_chat_rid", None)
+        ctx.user_data.pop("state", None)
+        if not rid:
+            await m.reply_text("⚠️ انتهت العملية."); return
+        room = ses_get_room(rid)
+        if not room:
+            await m.reply_text("⚠️ الغرفة انتهت."); return
+        if not ses_is_in_room(rid, uid):
+            await m.reply_text("⚠️ لست في هذه الغرفة."); return
+        if ses_is_muted(rid, uid):
+            await m.reply_text("🔇 أنت مكتوم عن التعليقات."); return
+        if not room.get("comments_open", True):
+            await m.reply_text("🔒 التعليقات مغلقة حالياً."); return
+        comment_text = text.strip()
+        if not comment_text:
+            await m.reply_text("⚠️ أرسل نصاً صحيحاً."); return
+        user_obj = update.effective_user
+        uname = user_obj.first_name or user_obj.username or str(uid)
+        ses_add_comment(rid, uid, uname, comment_text)
+        await m.reply_text(
+            "✅ *تم إرسال تعليقك!*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("💬 عرض التعليقات", callback_data=f"ses_chat_{rid}"),
+            ]]),
         )
         return
 
