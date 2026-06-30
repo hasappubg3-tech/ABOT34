@@ -6,5 +6,3 @@ pymongo
 dnspython
 email_validator
 gunicorn
-psycopg2-binary
-flask-sqlalchemy
