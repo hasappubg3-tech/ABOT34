@@ -33,24 +33,25 @@ def _cd_format_remaining(target_dt):
     return "⏳ " + "، ".join(parts)
 
 def _cd_message_text(cd):
-    remaining = _cd_format_remaining(cd["target_dt"])
-    dt_str    = cd["target_dt"].strftime("%Y/%m/%d - %H:%M")
-    personal  = "\n_🔒 موعد شخصي_" if cd.get("owner_id") is not None else ""
-    return (
-        f"📅 *{cd['label']}*{personal}\n\n"
-        f"{remaining}\n\n"
-        f"🗓 *الموعد:* `{dt_str}` (بتوقيت العراق)"
-    )
+    personal = "\n_🔒 موعد شخصي_" if cd.get("owner_id") is not None else ""
+    return f"📅 *{cd['label']}*{personal}"
 
-def _cd_view_kb(cd_id, owner_id, uid, admin_user):
-    can_del = admin_user or (owner_id == uid)
-    back = [InlineKeyboardButton("🔙 للقائمة", callback_data="cd_back")]
+def _cd_view_kb(cd_id, owner_id, uid, admin_user, target_dt):
+    remaining = _cd_format_remaining(target_dt)
+    can_del   = admin_user or (owner_id == uid)
+    back      = [InlineKeyboardButton("🔙 للقائمة", callback_data="cd_back")]
     if can_del:
         back.append(InlineKeyboardButton("🗑 حذف", callback_data=f"cd_del_{cd_id}"))
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 تحديث",  callback_data=f"cd_refresh_{cd_id}"),
-         InlineKeyboardButton("📌 تثبيت",  callback_data=f"cd_pin_{cd_id}")],
+        [InlineKeyboardButton(remaining,       callback_data=f"cd_refresh_{cd_id}")],
+        [InlineKeyboardButton("📌 تثبيت",     callback_data=f"cd_pin_{cd_id}")],
         back,
+    ])
+
+def _cd_pinned_kb(cd_id, target_dt):
+    remaining = _cd_format_remaining(target_dt)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(remaining, callback_data=f"cd_refresh_{cd_id}")],
     ])
 
 def _cd_list_kb(countdowns, uid, admin_user):

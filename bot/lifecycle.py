@@ -31,7 +31,7 @@ async def _cd_auto_update_job(ctx):
             to_remove.append((chat_id, msg_id))
             continue
         text = _cd_message_text(cd)
-        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), user_id, is_admin(user_id))
+        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), user_id, is_admin(user_id), cd["target_dt"])
         try:
             await ctx.bot.edit_message_text(
                 chat_id=chat_id,

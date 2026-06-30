@@ -456,7 +456,7 @@ async def cb_manage(update: Update, ctx):
             except Exception: pass
             return
         text = _cd_message_text(cd)
-        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), uid, is_admin(uid))
+        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), uid, is_admin(uid), cd["target_dt"])
         try:
             await q.edit_message_text(text, parse_mode="Markdown", reply_markup=kb)
             _CD_WATCH[(q.message.chat_id, q.message.message_id)] = (cd_id, uid)
@@ -466,11 +466,11 @@ async def cb_manage(update: Update, ctx):
     if d.startswith("cd_refresh_"):
         cd_id = int(d[11:])
         cd    = cd_get(cd_id)
-        await q.answer("تم التحديث ✅")
+        await q.answer()
         if not cd:
             return
         text = _cd_message_text(cd)
-        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), uid, is_admin(uid))
+        kb   = _cd_view_kb(cd["id"], cd.get("owner_id"), uid, is_admin(uid), cd["target_dt"])
         try:
             await q.edit_message_text(text, parse_mode="Markdown", reply_markup=kb)
             _CD_WATCH[(q.message.chat_id, q.message.message_id)] = (cd_id, uid)
@@ -483,14 +483,14 @@ async def cb_manage(update: Update, ctx):
         await q.answer("📌 جاري التثبيت...")
         if not cd:
             return
-        pinned_text = _cd_message_text(cd)
-        old_msg     = q.message
+        old_msg = q.message
         _CD_WATCH.pop((old_msg.chat_id, old_msg.message_id), None)
         try:
             new_msg = await ctx.bot.send_message(
                 chat_id=old_msg.chat_id,
-                text=pinned_text,
-                parse_mode="Markdown"
+                text=_cd_message_text(cd),
+                parse_mode="Markdown",
+                reply_markup=_cd_pinned_kb(cd["id"], cd["target_dt"])
             )
             try: await ctx.bot.pin_chat_message(old_msg.chat_id, new_msg.message_id, disable_notification=True)
             except Exception: pass
