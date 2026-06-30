@@ -13,7 +13,8 @@ from .shared import *
 logger = logging.getLogger(__name__)
 
 ATTENDANCE_WINDOW = 120
-_ACTIVE = ["waiting", "studying", "break", "attendance"]
+READY_THRESHOLD   = 0.25          # 25 % من المشاركين يكفي لبدء الجلسة تلقائياً
+_ACTIVE = ["waiting", "studying", "break", "attendance", "ready_check"]
 
 # ══════════════════════════════════════════════════════════════════
 # قاعدة البيانات – Collections
@@ -192,6 +193,20 @@ def ses_end_room(rid: int):
         "status": "ended", "ended_at": datetime.datetime.utcnow(),
     }})
 
+def ses_open_ready_check(rid: int):
+    """يفتح نافذة جاهزية بعد الاستراحة — ينتظر ضغط المشاركين أو قرار المالك."""
+    _col_r().update_one({"id": rid}, {"$set": {
+        "status": "ready_check", "ready_users": [],
+    }})
+
+def ses_mark_ready(rid: int, uid: int) -> tuple:
+    """يُسجّل المستخدم كجاهز. يُعيد (عدد_الجاهزين, مجموع_المشاركين)."""
+    _col_r().update_one({"id": rid}, {"$addToSet": {"ready_users": uid}})
+    room  = _get_room_any(rid)
+    ready = len(room.get("ready_users", []))
+    total = _col_p().count_documents({"room_id": rid})
+    return ready, total
+
 # ══════════════════════════════════════════════════════════════════
 # التعليقات
 # ══════════════════════════════════════════════════════════════════
@@ -232,7 +247,26 @@ def ses_get_user_rooms(uid: int) -> list:
     return rooms
 
 def ses_get_room_top(rid: int, limit: int = 10):
-    return [_strip(p) for p in _col_p().find({"room_id": rid}).sort("total_study_seconds", -1).limit(limit)]
+    """يُعيد أفضل المشاركين مُجمَّعين عبر كل غرف المالك نفسه (لا تُفقد الإحصائيات عند إعادة الإنشاء)."""
+    room = _get_room_any(rid)
+    if not room:
+        return []
+    creator_id = room["creator_id"]
+    owner_room_ids = [r["id"] for r in _col_r().find({"creator_id": creator_id}, {"id": 1})]
+    result = list(_col_p().aggregate([
+        {"$match": {"room_id": {"$in": owner_room_ids}}},
+        {"$group": {
+            "_id":                "$user_id",
+            "user_id":            {"$first": "$user_id"},
+            "user_name":          {"$last":  "$user_name"},
+            "total_study_seconds":{"$sum":   "$total_study_seconds"},
+            "sessions_attended":  {"$sum":   "$sessions_attended"},
+        }},
+        {"$match": {"total_study_seconds": {"$gt": 0}}},
+        {"$sort":  {"total_study_seconds": -1}},
+        {"$limit": limit},
+    ]))
+    return [dict(r) for r in result]
 
 def ses_get_global_top(limit: int = 10):
     return list(_col_p().aggregate([
@@ -257,7 +291,8 @@ def _fmt_time(secs: int) -> str:
     return f"{h}س {m2}د" if m2 else f"{h}س"
 
 _ST = {"waiting": "⏳ تنتظر", "studying": "📚 دراسة",
-       "break": "☕ استراحة", "attendance": "✋ حضور", "ended": "🏁 انتهت"}
+       "break": "☕ استراحة", "attendance": "✋ حضور",
+       "ready_check": "🔔 تحقق جاهزية", "ended": "🏁 انتهت"}
 
 def ses_menu_text() -> str:
     cnt = len(ses_get_active_rooms())
@@ -410,7 +445,9 @@ def kb_ses_room(room, uid: int, is_in: bool) -> InlineKeyboardMarkup:
     rows  = []
     if is_cr:
         if st == "waiting":
-            rows.append([InlineKeyboardButton("🚀 بدء الجلسة", callback_data=f"ses_start_{rid}")])
+            rows.append([InlineKeyboardButton("🚀 بدء الجلسة",    callback_data=f"ses_start_{rid}")])
+        elif st == "ready_check":
+            rows.append([InlineKeyboardButton("🚀 بدء الجلسة الآن", callback_data=f"ses_force_start_{rid}")])
         rows.append([InlineKeyboardButton("⏹ إنهاء الغرفة", callback_data=f"ses_end_{rid}")])
     elif not is_in:
         rows.append([InlineKeyboardButton("✅ انضمام للغرفة", callback_data=f"ses_join_{rid}")])
@@ -421,6 +458,15 @@ def kb_ses_room(room, uid: int, is_in: bool) -> InlineKeyboardMarkup:
     if is_cr:
         rows.append([InlineKeyboardButton("⚙️ إعدادات الغرفة", callback_data=f"ses_settings_{rid}")])
     rows.append([InlineKeyboardButton("🔙 الغرف المتاحة", callback_data="ses_rooms")])
+    return InlineKeyboardMarkup(rows)
+
+def kb_ses_ready_check(rid: int, is_creator: bool, ready: int, total: int) -> InlineKeyboardMarkup:
+    needed  = max(1, int(total * READY_THRESHOLD))
+    pct_txt = f"✅ جاهز {ready}/{total} (نحتاج {needed})"
+    rows = [[InlineKeyboardButton(pct_txt,         callback_data=f"ses_ready_{rid}")]]
+    if is_creator:
+        rows.append([InlineKeyboardButton("🚀 بدء الجلسة الآن", callback_data=f"ses_force_start_{rid}")])
+    rows.append([InlineKeyboardButton("🏠 الغرفة", callback_data=f"ses_room_{rid}")])
     return InlineKeyboardMarkup(rows)
 
 def kb_ses_attendance(rid: int, sn: int) -> InlineKeyboardMarkup:
@@ -603,6 +649,32 @@ async def _ses_break_end_job(ctx):
     if not room or room["status"] != "break":
         logger.info(f"[SES] تجاهل نهاية الاستراحة: status={room and room.get('status')}")
         return
+    ses_open_ready_check(rid)
+    pts   = ses_get_participants(rid)
+    n     = len(pts)
+    needed = max(1, int(n * READY_THRESHOLD))
+    sn_next = (room.get("current_session") or 0) + 1
+    for p in pts:
+        is_cr = p["user_id"] == room["creator_id"]
+        markup = kb_ses_ready_check(rid, is_creator=is_cr, ready=0, total=n)
+        try:
+            await ctx.bot.send_message(
+                chat_id=p["user_id"],
+                text=(f"🔔 *انتهت الاستراحة!*\n\n"
+                      f"🏠 {room['name']} | الجلسة *{sn_next}*\n"
+                      f"👥 {n} مشاركين\n\n"
+                      f"اضغط *جاهز* للبدء — يبدأ تلقائياً عند {needed} جاهزين ({int(READY_THRESHOLD*100)}%)"),
+                parse_mode="Markdown",
+                reply_markup=markup)
+        except Exception as e:
+            logger.warning(f"[SES] خطأ إرسال ready_check uid={p['user_id']}: {e}")
+    logger.info(f"[SES] فُتحت نافذة الجاهزية للغرفة={rid}")
+
+async def _ses_do_start_study(bot, jq, rid: int):
+    """يبدأ مرحلة دراسة جديدة ويُرسل إشعاراً لكل المشاركين."""
+    room = _get_room_any(rid)
+    if not room or room["status"] != "ready_check":
+        return
     sn    = ses_next_study_phase(rid)
     room  = _get_room_any(rid)
     study = room["study_time"]
@@ -610,7 +682,7 @@ async def _ses_break_end_job(ctx):
     n     = len(pts)
     for p in pts:
         try:
-            await ctx.bot.send_message(
+            await bot.send_message(
                 chat_id=p["user_id"],
                 text=(f"📚 *ابدأ الدراسة الآن!*\n\n"
                       f"🏠 {room['name']} | الجلسة *{sn}*\n"
@@ -620,7 +692,7 @@ async def _ses_break_end_job(ctx):
                 reply_markup=kb_ses_back_to_room(rid))
         except Exception as e:
             logger.warning(f"[SES] خطأ إرسال بدء الدراسة uid={p['user_id']}: {e}")
-    ctx.job_queue.run_once(
+    jq.run_once(
         _ses_study_end_job, when=datetime.timedelta(minutes=study),
         data={"rid": rid, "sn": sn}, name=f"ses_study_{rid}_{sn}")
     logger.info(f"[SES] جُدول نهاية الدراسة جلسة={sn} بعد {study}د")
@@ -673,6 +745,10 @@ def ses_recover_active_rooms(jq):
                 jq.run_once(_ses_break_end_job, when=remaining,
                             data={"rid": rid}, name=f"ses_break_{rid}_{sn}")
                 logger.info(f"[SES] غرفة={rid} استراحة | متبقٍ={remaining:.0f}ث")
+
+            elif status == "ready_check":
+                # لا حاجة لمؤقت — ينتظر قرار المالك أو نسبة الجاهزية
+                logger.info(f"[SES] غرفة={rid} جاهزية | لا مؤقت مطلوب")
 
         except Exception as e:
             logger.error(f"[SES] خطأ استئناف غرفة={rid}: {e}")
@@ -861,6 +937,50 @@ async def handle_ses_callback(q, ctx, uid: int, chat_id: int):
         await q.edit_message_text("🚀 *بدأت الجلسة!*\n\n" + _room_info_text(room, pts),
                                   parse_mode="Markdown",
                                   reply_markup=kb_ses_room(room, uid, True)); return
+
+    # ── الجاهزية لبدء الجلسة التالية ─────────────────────────────
+    if d.startswith("ses_ready_"):
+        rid  = int(d[10:])
+        room = ses_get_room(rid)
+        if not room or room["status"] != "ready_check":
+            await q.answer("⚠️ لا توجد نافذة جاهزية الآن.", show_alert=True); return
+        if not ses_is_in_room(rid, uid):
+            await q.answer("⚠️ لست في هذه الغرفة.", show_alert=True); return
+        ready, total = ses_mark_ready(rid, uid)
+        needed = max(1, int(total * READY_THRESHOLD))
+        await q.answer(f"✅ تم تسجيل جاهزيتك! ({ready}/{total})")
+        # حدّث الأزرار في رسالة المستخدم لتعكس العدد الجديد
+        try:
+            is_cr  = uid == room["creator_id"]
+            await q.edit_message_reply_markup(
+                reply_markup=kb_ses_ready_check(rid, is_creator=is_cr,
+                                                ready=ready, total=total))
+        except Exception: pass
+        # بدء تلقائي إذا بلغ العدد الحد المطلوب
+        if ready >= needed:
+            logger.info(f"[SES] الحد (25%) بُلغ ({ready}/{total}) → بدء تلقائي")
+            await _ses_do_start_study(ctx.bot, ctx.job_queue, rid)
+        return
+
+    # ── المالك يبدأ الجلسة التالية يدوياً ──────────────────────────
+    if d.startswith("ses_force_start_"):
+        rid  = int(d[16:])
+        room = ses_get_room(rid)
+        if not room:
+            await q.answer("⚠️ الغرفة غير موجودة.", show_alert=True); return
+        if room["creator_id"] != uid:
+            await q.answer("❌ فقط المنشئ يمكنه البدء.", show_alert=True); return
+        if room["status"] != "ready_check":
+            await q.answer("⚠️ الجلسة ليست في وضع الجاهزية.", show_alert=True); return
+        await q.answer("🚀 تم بدء الجلسة!")
+        await _ses_do_start_study(ctx.bot, ctx.job_queue, rid)
+        room = ses_get_room(rid); pts = ses_get_participants(rid)
+        try:
+            await q.edit_message_text("🚀 *بدأت الجلسة!*\n\n" + _room_info_text(room, pts),
+                                      parse_mode="Markdown",
+                                      reply_markup=kb_ses_room(room, uid, True))
+        except Exception: pass
+        return
 
     # ── إنهاء الغرفة ──────────────────────────────────────────────
     if d.startswith("ses_end_"):
