@@ -871,7 +871,7 @@ async def on_message(update: Update, ctx):
         ctx.user_data.pop("state", None)
         if not bid: return
 
-        if not GEMINI_KEYS:
+        if not get_all_gemini_keys():
             await m.reply_text("❌ خاصية الملء التلقائي تتطلب مفتاح Gemini API."); return
 
         wait_msg = await m.reply_text(f"⏳ جاري توليد {count} سؤال بالذكاء الاصطناعي...")
@@ -1773,7 +1773,7 @@ async def on_message(update: Update, ctx):
         if not request_text:
             await m.reply_text("💡 اكتب طلبك بعد النقطة. مثال:\n. أضف أزرار: خدماتنا، من نحن، تواصل معنا")
             return
-        if not GEMINI_KEYS:
+        if not get_all_gemini_keys():
             await m.reply_text("❌ لم يُعَيَّن أي مفتاح Gemini API.")
             return
         # ── تطبيق الصور المخزنة ───────────────────────────────────
