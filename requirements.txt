@@ -4,3 +4,8 @@ httpx~=0.25.2
 pymongo
 dnspython
 email_validator
+email_validator
+flask
+flask-sqlalchemy
+gunicorn
+psycopg2-binary
