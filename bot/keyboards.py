@@ -712,6 +712,7 @@ def kb_notif1_settings():
         InlineKeyboardButton(f'زر "نعم": {ok_text}',    callback_data="st_notif_ok_text"),
         InlineKeyboardButton(f'زر "لا": {cancel_text}', callback_data="st_notif_cancel_text"),
     ])
+    rows.append([InlineKeyboardButton("💖 نص رسالة الشكر", callback_data="st_notif_thanks_text")])
     has_block_photo = bool(get_setting("notif_block_photo", "").strip())
     has_block_text  = bool(get_setting("notif_block_text", "").strip())
     photo_lbl = "📷 صورة الحظر ✅" if has_block_photo else "📷 صورة الحظر"

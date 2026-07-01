@@ -23,10 +23,11 @@ async def cb_manage(update: Update, ctx):
             ctx.user_data.pop("sub_no_count", None)
             reset_notif_no_count(uid)
             clear_file_block(uid)
+            thanks_text_v = get_setting("notif_thanks_text", "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.")
             try:
                 await ctx.bot.send_message(
                     chat_id=chat_id_v,
-                    text="✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                    text=thanks_text_v,
                     parse_mode="Markdown",
                     api_kwargs={"message_effect_id": "5046509860389126442"}
                 )
@@ -34,7 +35,7 @@ async def cb_manage(update: Update, ctx):
                 try:
                     await ctx.bot.send_message(
                         chat_id=chat_id_v,
-                        text="✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                        text=thanks_text_v,
                         parse_mode="Markdown"
                     )
                 except Exception: pass
@@ -201,10 +202,11 @@ async def cb_manage(update: Update, ctx):
             clear_file_block(uid)
             try: await q.edit_message_reply_markup(reply_markup=None)
             except Exception: pass
+            thanks_text = get_setting("notif_thanks_text", "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.")
             try:
                 await ctx.bot.send_message(
                     chat_id=q.message.chat_id,
-                    text="✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                    text=thanks_text,
                     parse_mode="Markdown",
                     api_kwargs={"message_effect_id": "5046509860389126442"}
                 )
@@ -212,7 +214,7 @@ async def cb_manage(update: Update, ctx):
                 try:
                     await ctx.bot.send_message(
                         chat_id=q.message.chat_id,
-                        text="✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
+                        text=thanks_text,
                         parse_mode="Markdown"
                     )
                 except Exception: pass
@@ -1730,6 +1732,17 @@ async def cb_manage(update: Update, ctx):
         cur = get_setting("notif_ok_text", "✅ نعم، اشتركت")
         await q.edit_message_text(
             f'✏️ *تعديل نص زر "نعم"*\n\nالنص الحالي: `{cur}`\n\nأرسل النص الجديد:',
+            parse_mode="Markdown",
+            reply_markup=kb_cancel_inline()
+        )
+        return
+
+    if d == "st_notif_thanks_text":
+        ctx.user_data["state"] = "wait_notif_thanks_text"
+        cur = get_setting("notif_thanks_text", "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.")
+        await q.edit_message_text(
+            f"💖 *تعديل رسالة الشكر*\n\nالنص الحالي:\n{cur}\n\n"
+            "أرسل النص الجديد (يمكن استخدام تنسيق ماركداون). سترسل تلقائياً بتأثير القلوب 💖:",
             parse_mode="Markdown",
             reply_markup=kb_cancel_inline()
         )

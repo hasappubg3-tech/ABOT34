@@ -280,13 +280,18 @@ async def send_items(m, bid, uid=None, bot=None):
                 clear_file_block(uid)
                 reset_notif_no_count(uid)
                 clear_pending_notif(uid)
+                thanks_text = get_setting("notif_thanks_text", "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.")
                 try:
                     await m.reply_text(
-                        "✅ *شكراً لك!*\n\nيمكنك الآن الاستمرار في التصفح.",
-                        parse_mode="Markdown"
+                        thanks_text,
+                        parse_mode="Markdown",
+                        message_effect_id="5046509860389126442"
                     )
                 except Exception:
-                    pass
+                    try:
+                        await m.reply_text(thanks_text, parse_mode="Markdown")
+                    except Exception:
+                        pass
                 # نستمر بالتنفيذ الطبيعي لإرسال المحتوى المطلوب أدناه
             else:
                 mins = max(1, (remaining + 59) // 60)

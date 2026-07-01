@@ -978,6 +978,31 @@ async def on_message(update: Update, ctx):
         await m.reply_text(f"✅ تم حفظ نص زر \"لا\": {m.text.strip()}", reply_markup=build_kb(uid, pid))
         return
 
+    # ── انتظار نص رسالة الشكر ─────────────────────────────────────
+    if state == "wait_notif_thanks_text":
+        if not m.text or m.text in SPECIAL_BTNS:
+            await m.reply_text("⚠️ أرسل نصاً صحيحاً."); return
+        set_setting("notif_thanks_text", m.text.strip())
+        ctx.user_data.pop("state", None)
+        await set_panel(ctx, chat_id, "📢 *رسالة الاشتراك*", kb_notif1_settings())
+        try:
+            await m.reply_text(
+                "✅ تم حفظ رسالة الشكر، هذا مثال عليها بتأثير القلوب:",
+                reply_markup=build_kb(uid, pid)
+            )
+            await ctx.bot.send_message(
+                chat_id=chat_id,
+                text=m.text.strip(),
+                parse_mode="Markdown",
+                api_kwargs={"message_effect_id": "5046509860389126442"}
+            )
+        except Exception:
+            try:
+                await ctx.bot.send_message(chat_id=chat_id, text=m.text.strip(), parse_mode="Markdown")
+            except Exception:
+                pass
+        return
+
     # ── انتظار صورة الحظر ─────────────────────────────────────────
     if state == "wait_notif_block_photo":
         if not is_admin(uid):
