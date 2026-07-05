@@ -543,6 +543,10 @@ def del_item(iid):
 def upd_item_content(iid, content):
     _col("content_items").update_one({"id": iid}, {"$set": {"content": content}})
 
+def upd_items_desc(bid, new_desc):
+    """يحدّث الوصف (content) لجميع عناصر زر المحتوى المحدد."""
+    _col("content_items").update_many({"button_id": bid}, {"$set": {"content": new_desc}})
+
 def get_item(iid):
     return _d(_col("content_items").find_one({"id": iid}))
 

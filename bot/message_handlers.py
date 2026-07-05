@@ -1738,6 +1738,20 @@ async def on_message(update: Update, ctx):
         await _refresh_mlz_panel(ctx.bot, ctx)
         return
 
+    # ── ملزمة: انتظار وصف يدوي جديد بعد الإضافة ─────────────────
+    if state == "wait_mlz_new_desc":
+        val = m.text.strip() if m.text else ""
+        if not val:
+            await m.reply_text("⚠️ أرسل نصاً للوصف."); return
+        bid = ctx.user_data.pop("mlz_ed_bid", None)
+        ctx.user_data.pop("state", None)
+        if bid:
+            upd_items_desc(bid, val)
+            await m.reply_text("✅ تم تحديث الوصف بنجاح.")
+        else:
+            await m.reply_text("⚠️ حدث خطأ: لم يُحدَّد الزر.")
+        return
+
     # ── تحليل صورة بالذكاء الاصطناعي (للمشرفين فقط) ─────────────
     if not state and m.photo and is_admin(uid):
         import re

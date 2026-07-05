@@ -333,6 +333,17 @@ async def cb_manage(update: Update, ctx):
         elif d.startswith("mlz_sub_"):
             bid = int(d[len("mlz_sub_"):])
             await after_mlz_subject_pick(q, ctx, uid, chat_id, bid)
+
+        elif d.startswith("mlz_ed_"):
+            bid = int(d[len("mlz_ed_"):])
+            ctx.user_data['mlz_ed_bid'] = bid
+            ctx.user_data['state'] = 'wait_mlz_new_desc'
+            await q.answer()
+            await q.message.reply_text(
+                "✏️ أرسل الوصف الجديد للملف:\n"
+                "_(يستبدل الوصف الحالي لجميع محتويات هذا الزر)_",
+                parse_mode='Markdown'
+            )
         return
 
     # ── جلسات الدراسة الجماعية ──────────────────────────────────────────

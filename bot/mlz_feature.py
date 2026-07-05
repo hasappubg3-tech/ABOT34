@@ -335,12 +335,22 @@ def find_or_build_mlz_path(grade: str, subject: str, teacher: str):
 
     return grade_btn, mlz_btn, subject_btn, teacher_btn
 
-def _build_desc(subject, teacher, grade, year, part=''):
+def _with_al(subject: str) -> str:
+    """يُضيف 'ال' التعريف للمادة إن لم تكن موجودة مسبقاً."""
+    s = subject.strip()
+    if not s:
+        return s
+    if s.startswith('ال'):
+        return s
+    return f"ال{s}"
+
+def _build_desc(subject, teacher, grade, year, part='', mlz_type='ملزمة'):
     part_str = f" الجزء {part}" if part else ""
     clean_grade = _strip_emoji(grade)
     clean_subject = _strip_emoji(subject).strip()
+    subject_with_al = _with_al(clean_subject)
     return (
-        f"⚜️ | ملزمة {clean_subject}{part_str}\n"
+        f"⚜️ | {mlz_type} {subject_with_al}{part_str} {year}\n"
         f"⚜️ | للاستاذ {teacher}\n"
         f"⚜️ | {clean_grade}\n"
         f"⚜️ | سنة الاصدار : {year}\n"
@@ -726,7 +736,7 @@ async def finish_mlz_flow(m, ctx, uid, chat_id, bot):
     year      = ctx.user_data.get('mlz_year', '')
     part      = ctx.user_data.get('mlz_part', '')
     mlz_type  = ctx.user_data.get('mlz_type') or 'ملزمة'
-    desc      = ctx.user_data.get('mlz_desc') or _build_desc(subject, teacher, grade, year, part)
+    desc      = ctx.user_data.get('mlz_desc') or _build_desc(subject, teacher, grade, year, part, mlz_type)
     file_type = ctx.user_data.get('mlz_file_type')
     file_id   = ctx.user_data.get('mlz_file_id')
 
@@ -824,7 +834,10 @@ async def _do_add_mlz(wait_msg, ctx, bot, teacher_bid, btn_name, file_type, file
         f"{note}"
         f"📂 *الموقع:*\n`{path_str}`\n\n"
         f"📝 *الوصف:*\n`{desc}`",
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✏️ كتابة الوصف يدوياً", callback_data=f"mlz_ed_{content_bid}")
+        ]])
     )
 
 __all__ = [name for name in globals() if not name.startswith("__")]
