@@ -12,7 +12,7 @@ language = "python3"
 requiredFiles = [".replit", "replit.nix"]
 
 [deployment]
-run = ["python", "main.py"]
+run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 deploymentTarget = "autoscale"
 
 [agent]
