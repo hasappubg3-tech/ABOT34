@@ -216,13 +216,21 @@ def mark_notif_sent(uid):
         "last_notif_sessions": s.get("sessions", 0),
     }})
 
-def set_pending_notif(uid, bid):
+def set_pending_notif(uid, bid, chat_id=None, msg_id=None):
     _ensure_user_stats(uid)
-    _col("user_stats").update_one({"user_id": uid}, {"$set": {"pending_notif_bid": bid}})
+    update = {"pending_notif_bid": bid}
+    if chat_id is not None:
+        update["pending_notif_chat_id"] = int(chat_id)
+        update["pending_notif_msg_id"]  = int(msg_id) if msg_id else 0
+    _col("user_stats").update_one({"user_id": uid}, {"$set": update})
 
 def clear_pending_notif(uid):
     _ensure_user_stats(uid)
-    _col("user_stats").update_one({"user_id": uid}, {"$set": {"pending_notif_bid": 0}})
+    _col("user_stats").update_one({"user_id": uid}, {"$set": {
+        "pending_notif_bid": 0,
+        "pending_notif_chat_id": 0,
+        "pending_notif_msg_id": 0,
+    }})
 
 def record_channel_subscription(uid):
     _ensure_user_stats(uid)
@@ -235,6 +243,14 @@ def record_channel_subscription(uid):
 def get_pending_notif(uid):
     s = get_user_stats(uid)
     return s.get("pending_notif_bid", 0) or 0
+
+def get_pending_notif_gate(uid):
+    """يُعيد (bid, chat_id, msg_id) لرسالة البوابة الحالية المعلّقة."""
+    s = get_user_stats(uid)
+    bid     = s.get("pending_notif_bid",     0) or 0
+    chat_id = s.get("pending_notif_chat_id", 0) or 0
+    msg_id  = s.get("pending_notif_msg_id",  0) or 0
+    return bid, chat_id, msg_id
 
 def get_user_ratings_hidden(uid):
     s = get_user_stats(uid)
@@ -350,11 +366,11 @@ async def send_notif_gate(target, uid, bid):
     markup = InlineKeyboardMarkup(rows)
     try:
         try:
-            await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+            sent = await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
         except Exception:
-            await target.reply_text(msg, reply_markup=markup)
+            sent = await target.reply_text(msg, reply_markup=markup)
         mark_notif_sent(uid)
-        set_pending_notif(uid, bid)
+        set_pending_notif(uid, bid, chat_id=sent.chat_id, msg_id=sent.message_id)
     except Exception:
         pass
 

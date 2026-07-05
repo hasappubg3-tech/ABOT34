@@ -214,6 +214,14 @@ async def resend_notif_gate(target, uid, bid):
     ok_text     = get_setting("notif_ok_text",    "✅ نعم، اشتركت")
     cancel_text = get_setting("notif_cancel_text", "❌ لا، لاحقاً")
 
+    # حذف رسالة البوابة القديمة قبل إرسال الجديدة (لتجنب تراكم رسائل الاشتراك)
+    _, old_chat_id, old_msg_id = get_pending_notif_gate(uid)
+    if old_chat_id and old_msg_id:
+        try:
+            await target.get_bot().delete_message(chat_id=old_chat_id, message_id=old_msg_id)
+        except Exception:
+            pass
+
     rows = []
     if chan:
         url = chan if chan.startswith("http") else f"https://t.me/{chan.lstrip('@')}"
@@ -225,9 +233,10 @@ async def resend_notif_gate(target, uid, bid):
     markup = InlineKeyboardMarkup(rows)
     try:
         try:
-            await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
+            sent = await target.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
         except Exception:
-            await target.reply_text(msg, reply_markup=markup)
+            sent = await target.reply_text(msg, reply_markup=markup)
+        set_pending_notif(uid, bid, chat_id=sent.chat_id, msg_id=sent.message_id)
     except Exception:
         pass
 
