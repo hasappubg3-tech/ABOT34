@@ -1108,6 +1108,24 @@ async def on_message(update: Update, ctx):
                            reply_markup=build_kb(uid, pid))
         return
 
+    # ── انتظار قيمة طلبات AI المتزامنة ──────────────────────────
+    if state == "wait_ai_queue_concurrency":
+        if not m.text or not m.text.strip().isdigit():
+            await m.reply_text("⚠️ أرسل رقماً صحيحاً بين 1 و10."); return
+        val = int(m.text.strip())
+        if not 1 <= val <= 10:
+            await m.reply_text("⚠️ الرقم يجب أن يكون بين 1 و10."); return
+        ctx.user_data.pop("state", None)
+        set_setting("ai_queue_concurrency", str(val))
+        init_ai_semaphore(val)
+        await set_panel(ctx, chat_id,
+            "🤖 *إعدادات الذكاء الاصطناعي*\n\n"
+            "من هنا تتحكم بمفاتيح Gemini API وإعدادات ذاكرة المحادثة للسادس العلمي.",
+            kb_ai_settings())
+        await m.reply_text(f"✅ تم حفظ عدد الطلبات المتزامنة: *{val}*", parse_mode="Markdown",
+                           reply_markup=build_kb(uid, pid))
+        return
+
     # ── انتظار مفاتيح Gemini API ──────────────────────────────────
     if state == "wait_api_keys":
         if not m.text or m.text.strip() in SPECIAL_BTNS:

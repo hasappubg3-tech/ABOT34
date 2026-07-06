@@ -797,10 +797,12 @@ def kb_ai_settings():
     memory_count = get_ai_memory_count()
     memory_icon = "🟢" if memory_on else "🔴"
     memory_label = f"{memory_icon} الذاكرة: {'مفعّلة' if memory_on else 'معطّلة'} ({memory_count} رسائل)"
+    concurrency = get_ai_queue_concurrency()
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🔑 مفاتيح API ({keys_status})", callback_data="st_api_keys")],
         [InlineKeyboardButton(memory_label, callback_data="st_ai_memory_toggle")],
         [InlineKeyboardButton(f"🔢 عدد الرسائل المحفوظة: {memory_count}", callback_data="st_ai_memory_count")],
+        [InlineKeyboardButton(f"⚡ طلبات AI المتزامنة: {concurrency}", callback_data="st_ai_queue_concurrency")],
         [InlineKeyboardButton("رجوع", callback_data="st_back")],
     ])
 

@@ -1549,6 +1549,21 @@ async def cb_manage(update: Update, ctx):
         )
         return
 
+    if d == "st_ai_queue_concurrency":
+        concurrency = get_ai_queue_concurrency()
+        ctx.user_data["state"] = "wait_ai_queue_concurrency"
+        await q.edit_message_text(
+            f"⚡ *طلبات AI المتزامنة*\n\n"
+            f"الحالي: *{concurrency} طلبات*\n\n"
+            "أرسل رقماً بين 1 و10 لتحديد الحد الأقصى لعدد طلبات AI التي تُعالَج في نفس الوقت.\n\n"
+            "_مثال: 3 تعني أن 3 مستخدمين يمكنهم استخدام AI في آن واحد، والباقون ينتظرون دورهم بشكل تلقائي._",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("إلغاء", callback_data="st_ai_settings")
+            ]])
+        )
+        return
+
     if d == "st_api_keys":
         all_keys = get_all_gemini_keys()
         db_keys_str = get_setting("gemini_keys_db", "")

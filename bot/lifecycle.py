@@ -83,3 +83,5 @@ async def post_init(app):
     logging.info("تم تسجيل مهمة تحديث العداد التنازلي كل دقيقة.")
     ses_recover_active_rooms(app.job_queue)
     logging.info("تم التحقق من استئناف الجلسات النشطة.")
+    init_ai_semaphore()
+    logging.info("تم تهيئة طابور طلبات AI.")

@@ -148,4 +148,38 @@ def check_rate_limit(uid: int, kind: str = 'msg') -> bool:
     dq.append(now)
     return True
 
+# ── AI Queue (Semaphore) ──────────────────────────────────────────
+_ai_semaphore = None
+
+def init_ai_semaphore(concurrency: int = None):
+    global _ai_semaphore
+    import asyncio
+    if concurrency is None:
+        try:
+            concurrency = int(get_mongo_db()["settings"].find_one({"key": "ai_queue_concurrency"}) or {}).get("value", "3")
+        except Exception:
+            concurrency = 3
+        try:
+            concurrency = int(concurrency)
+        except Exception:
+            concurrency = 3
+    if concurrency < 1:
+        concurrency = 1
+    _ai_semaphore = asyncio.Semaphore(concurrency)
+    logging.info(f"AI Queue: تم تهيئة الطابور بـ {concurrency} طلب متزامن كحد أقصى.")
+
+def get_ai_semaphore():
+    global _ai_semaphore
+    if _ai_semaphore is None:
+        import asyncio
+        _ai_semaphore = asyncio.Semaphore(3)
+    return _ai_semaphore
+
+def get_ai_queue_concurrency() -> int:
+    try:
+        doc = get_mongo_db()["settings"].find_one({"key": "ai_queue_concurrency"})
+        return int(doc["value"]) if doc else 3
+    except Exception:
+        return 3
+
 __all__ = [name for name in globals() if not name.startswith("__")]
